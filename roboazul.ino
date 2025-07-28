@@ -223,7 +223,7 @@ void setup() {
   String corA = detectarCor(0);
   String corB = detectarCor(1);
   
-  // Pequeno delay para estabilizaçãoxxdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddccccc11111111                                       q                     11 11111   
+  // Pequeno delay para estabilização   
   delay(1000);
 
   vencerResistenciaInicial();
