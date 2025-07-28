@@ -474,29 +474,26 @@ void virarForte(int direcao) {
 }
 
 void virarComGiro(float anguloAlvo, int direcao) {
-  pararMotores();
-  mpu.read();
-  int anguloAlvoRobo = mpu.getYaw() + anguloAlvo;
-
-  while (abs(mpu.getYaw()) < abs(anguloAlvoRobo)) {
-    mpu.read();
-    if (direcao == DIREITA) {
-      // Girar para a direita
-      virar(DIREITA);
-    } else {
-      virar(ESQUERDA);
+    float yawInicial = mpu.getYaw();
+    float alvoYaw = fmod((yawInicial + anguloAlvo), 360);  // ou corrigir caso dê < 0
+    
+    while (true) {
+      mpu.read();
+      float yawAtual = fmod(mpu.getYaw(), 360);
+      float delta = fmod((yawAtual - alvoYaw + 360), 360);
+    
+      // Quando delta estiver pequeno o suficiente, atingimos o alvo
+      if (delta < 5 || delta > 355) break;
+    
+      if (direcao == DIREITA) virar(DIREITA);
+      else virar(ESQUERDA);
+    
+      Serial.print("Yaw: ");
+      Serial.println(yawAtual);
+      delay(10);
     }
-    // println para pular linha após o último dado
-
-
-    Serial.print("Yaw: ");
-    Serial.print(mpu.getYaw());
-    Serial.println(" °");
-    delay(10);  // Pequeno atraso para estabilidade
-  }
-  pararMotores();
-
 }
+
 
 
 
