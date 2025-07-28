@@ -19,7 +19,6 @@ int tempoOrbita = 2000;
 
 
 #define TCAADDR 0x70         // Endereço do TCA9548A
-#define MPU_CHANNEL 2        // Canal 2 onde o GY-521 está conectado
 GY521 mpu(0x68);             // Endereço padrão do MPU6050
 
 #define DIREITA 0
@@ -194,7 +193,6 @@ void setup() {
   Serial.println("Iniciando seguidor de linha...");
   Wire.begin();
 
-  tcaSelect(MPU_CHANNEL);
   mpu.begin();
   mpu.setAccelSensitivity(0);  //  2g
   mpu.setGyroSensitivity(0);   //  250 degrees/s
@@ -477,7 +475,6 @@ void virarForte(int direcao) {
 
 void virarComGiro(float anguloAlvo, int direcao) {
   pararMotores();
-  tcaSelect(MPU_CHANNEL);
   mpu.read();
   int anguloAlvoRobo = mpu.getYaw() + anguloAlvo;
 
