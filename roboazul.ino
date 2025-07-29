@@ -2,6 +2,7 @@
 #include <Wire.h>
 #include "Adafruit_TCS34725.h"
 #include <GY521.h>
+#include "SerialDebug.h" //https://github.com/JoaoLopesF/SerialDebug
 
 
 #include <NewPing.h>
@@ -11,8 +12,6 @@
 #define MAX_DISTANCE 50 // Maximum distance we want to ping for (in centimeters). Maximum sensor distance is rated at 400-500cm.
 
 NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE); // NewPing setup of pins and maximum distance.
-
-
 
 int tempopre90 = 1000;
 int tempoOrbita = 2000;
@@ -100,25 +99,26 @@ String detectarCor(uint8_t canal) {
       tcs1 = new Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
     tcs = tcs1;
   } else {
+    printE("O sensor especificado não existe!")
     return "erro";
   }
 
   if (!tcs->begin()) {
-    Serial.print("Sensor no canal ");
-    Serial.print(canal);
-    Serial.println(" não encontrado.");
+    printE("Sensor no canal ");
+    printE(canal);
+    printlnE(" não encontrado.");
     return "erro";
   }
 
   uint16_t r, g, b, c;
   tcs->getRawData(&r, &g, &b, &c);
 
-  Serial.print("Canal ");
-  Serial.print(canal);
-  Serial.print(" - R: "); Serial.print(r);
-  Serial.print(" G: "); Serial.print(g);
-  Serial.print(" B: "); Serial.print(b);
-  Serial.print(" C: "); Serial.println(c);
+  printV("Canal ");
+  printV(canal);
+  printV(" - R: "); printV(r);
+  printV(" G: "); printV(g);
+  printV(" B: "); printV(b);
+  printV(" C: "); printlnV(c);
 
   // PRETO: todos os canais baixos
   if (r < 3000 && g < 4400 && b < 3400) {
@@ -180,30 +180,51 @@ void lerSensores() {
   centDir = valorCentDir > limiarCentDir ? 1 : 0;
   extDir  = valorExtDir  > limiarExtDir  ? 1 : 0;
 
-  Serial.print("extEsq:");    Serial.print(valorExtEsq);
-  Serial.print(" centEsq:");  Serial.print(valorCentEsq); 
-  Serial.print(" centDir:");  Serial.print(valorCentDir); 
-  Serial.print(" extDir:");   Serial.println(valorExtDir);
+  printV("extEsq:");    printV(valorExtEsq);
+  printV(" centEsq:");  printV(valorCentEsq); 
+  printV(" centDir:");  printV(valorCentDir); 
+  printV(" extDir:");   printlnV(valorExtDir);
 }
+
+// SerialDebug Library
+
+// Disable all debug ? Good to release builds (production)
+// as nothing of SerialDebug is compiled, zero overhead :-)
+// For it just uncomment the DEBUG_DISABLED
+//#define DEBUG_DISABLED true
+
+// Disable SerialDebug debugger ? No more commands and features as functions and globals
+// Uncomment this to disable it 
+//#define DEBUG_DISABLE_DEBUGGER true
+
+// Define the initial debug level here (uncomment to do it)
+//#define DEBUG_INITIAL_LEVEL DEBUG_LEVEL_VERBOSE
+
+// Disable auto function name (good if your debug yet contains it)
+//#define DEBUG_AUTO_FUNC_DISABLED true
+
+// Include SerialDebug
 
 
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("Iniciando seguidor de linha...");
+  printlnA("Iniciando seguidor de linha...");
   Wire.begin();
 
+  printlnV("Iniciando MPU...")
   mpu.begin();
   mpu.setAccelSensitivity(0);  //  2g
   mpu.setGyroSensitivity(0);   //  250 degrees/s
   mpu.setThrottle(false);
   mpu.calibrate(1500); // Calibra giroscópio parado
 
+  printlnV("Iniciando LEDs...")
   pinMode(LEDA, OUTPUT);
   pinMode(LEDB, OUTPUT);
   desligarLEDs();
 
-
+  printlnV("Iniciando motores...")
   // Inicializa os motores
   motorFrenteEsquerdo.setSpeed(velocidadeNormal);
   motorFrenteDireito.setSpeed(velocidadeNormal);
@@ -212,14 +233,16 @@ void setup() {
   
   // Para todos os motores inicialmente
   pararMotores();
-  
+
+  printlnV("Iniciando sensores de linha...")
   // Configura os pinos dos sensores como entrada
   pinMode(sensorExtEsquerdo, INPUT);
   pinMode(sensorCentEsquerdo, INPUT);
   pinMode(sensorCentDireito, INPUT);
   pinMode(sensorExtDireito, INPUT);
+  lerSensores();
 
-  
+  printlnV("Iniciando sensor de cor...")
   String corA = detectarCor(0);
   String corB = detectarCor(1);
   
@@ -227,15 +250,47 @@ void setup() {
   delay(1000);
 
   vencerResistenciaInicial();
+
+#ifndef DEBUG_DISABLE_DEBUGGER
+
+  // Add Functions and global variables to SerialDebug
+
+  // Add functions that can called from SerialDebug
+
+  //debugAddFunctionVoid(F("function"), &function); // Example for function without args
+  //debugAddFunctionStr(F("function"), &function); // Example for function with one String arg
+  //debugAddFunctionInt(F("function"), &function); // Example for function with one int arg
+
+  // Add global variables that can showed/changed from SerialDebug
+  // Note: Only global, if pass local for SerialDebug, can be dangerous
+
+  debugAddGlobalInt(F("tempopre90"), &tempopre90);
+  debugAddGlobalInt(F("tempoOrbita"), &tempoOrbita);
+  debugAddGlobalInt(F("extEsq"), &extEsq);
+  debugAddGlobalInt(F("centEsq"), &centEsq);
+  debugAddGlobalInt(F("centDir"), &centDir);
+  debugAddGlobalInt(F("extDir"), &extDir);
+
+#endif // DEBUG_DISABLE_DEBUGGER
+
 }
 
 void loop() {
+
+  // SerialDebug handle
+  // Notes: if in inactive mode (until receive anything from serial),
+  // it show only messages of always or errors level type
+  // And the overhead during inactive mode is very low
+  // Only if not DEBUG_DISABLED
+
+  debugHandle();
+
   lerSensores();
 
   float media = calcularPosicaoLinha();
   
-  Serial.print("Posição média: ");
-  Serial.println(media);
+  printV("Posição média: ");
+  printlnV(media);
 
   reverificar:
 
@@ -261,7 +316,7 @@ void loop() {
 
     
     if (corA == "preto" && corB == "preto") {
-      Serial.println("preto A && preto B");
+      printlnV("preto A && preto B");
       andarTras();  // ou qualquer ação especial
       delay(500);
     }
@@ -279,22 +334,22 @@ void loop() {
     else if (corA == "colorido" && corB != "colorido") {
       andarReto();
       delay(tempopre90);
-      Serial.println("colorido A && não colorido B");
+      printlnV("colorido A && não colorido B");
       virarComGiro(90, ESQUERDA);
     }
     else if (corA != "colorido" && corB == "colorido") {
       andarReto();
       delay(tempopre90);
-      Serial.println("não colorido A && colorido B");
+      printlnV("não colorido A && colorido B");
       virarComGiro(90, DIREITA);
     }
     else if (corA == "colorido" && corB == "colorido") {
-      Serial.println("colorido A && colorido B");
+      printlnV("colorido A && colorido B");
       virarComGiro(90, DIREITA);
       virarComGiro(90, DIREITA);
     }
     else {
-      Serial.println("nenhum colorido e nenhum preto ao mesmo tempo");
+      printlnV("nenhum colorido e nenhum preto ao mesmo tempo");
       andarReto();
       delay(1350);
     }
@@ -303,11 +358,11 @@ void loop() {
   }
 
   int distance = sonar.ping_cm();
-  Serial.print("Distância: ");
-  Serial.println(distance);
+  printV("Distância: ");
+  printlnV(distance);
 
   if (distance < 10 && distance != 0 ) {
-    Serial.println("Distância < 25: iniciando manobra de busca por linha.");
+    printlnV("Distância < 25: iniciando manobra de busca por linha.");
 
     pararMotores();
     delay(100);
@@ -326,7 +381,7 @@ void loop() {
       lerSensores();
 
       if (extEsq || centEsq || centDir || extDir) {
-        Serial.println("Linha encontrada!");
+        printlnV("Linha encontrada!");
         pararMotores();
         virarComGiro(90, ESQUERDA);
         return;
@@ -338,7 +393,7 @@ void loop() {
       if (millis() - ultimaVirada >= 2000) {
         pararMotores();
         delay(100);
-        Serial.println("Virando 90 graus para buscar linha...");
+        printlnV("Virando 90 graus para buscar linha...");
         virarComGiro(90, DIREITA);
         pararMotores();
         delay(100);
@@ -353,36 +408,36 @@ void loop() {
   if (extEsq && centEsq) {
     andarReto();
     delay(tempopre90);
-    Serial.println("Dois sensores da ESQUERDA ativados: giro 90° esquerda");
+    printlnV("Dois sensores da ESQUERDA ativados: giro 90° esquerda");
     virarComGiro(90, ESQUERDA);
     return;
   }
   else if (extDir && centDir) {
     andarReto();
     delay(tempopre90);
-    Serial.println("Dois sensores da DIREITA ativados: giro 90° direita");
+    printlnV("Dois sensores da DIREITA ativados: giro 90° direita");
     virarComGiro(90, DIREITA);
     return;
   }
   if (media < -1.5) {
     virarForte(ESQUERDA);
-    Serial.println("Virar forte para esquerda");
+    printlnV("Virar forte para esquerda");
   } 
   else if (media > 1.5) {
     virarForte(DIREITA);
-    Serial.println("Virar forte para direita");
+    printlnV("Virar forte para direita");
   } 
   else if (media < -0.7) {
     virar(ESQUERDA);
-    Serial.println("Virar para esquerda");
+    printlnV("Virar para esquerda");
   } 
   else if (media > 0.7) {
     virar(DIREITA);
-    Serial.println("Virar para direita");
+    printlnV("Virar para direita");
   } 
   else {
     andarReto();
-    Serial.println("Seguir reto");
+    printlnV("Seguir reto");
   }
   delay(50);
 
@@ -488,8 +543,8 @@ void virarComGiro(float anguloAlvo, int direcao) {
       if (direcao == DIREITA) virar(DIREITA);
       else virar(ESQUERDA);
     
-      Serial.print("Yaw: ");
-      Serial.println(yawAtual);
+      printV("Yaw: ");
+      printlnV(yawAtual);
       delay(10);
     }
 }
