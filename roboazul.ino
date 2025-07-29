@@ -524,7 +524,7 @@ void virarComGiro(float anguloAlvo, int direcao) {
     float alvoYaw = fmod((yawInicial + anguloAlvo), 360);  // ou corrigir caso dê < 0
     
     while (true) {
-      mpu.read();
+      mpu.readGyro();
       float yawAtual = fmod(mpu.getYaw(), 360);
       float delta = fmod((yawAtual - alvoYaw + 360), 360);
     
