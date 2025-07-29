@@ -5,6 +5,12 @@
 #include "SerialDebug.h"
 #include <NewPing.h>
 
+// Modificações:
+// Trocar GY-521 para conexão direta
+// Instalar QTR no chão, entre as rodas
+// Mover os sensores de cor para trás
+
+
 // Configurações de hardware
 #define TRIGGER_PIN  48
 #define ECHO_PIN     49
