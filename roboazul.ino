@@ -2,572 +2,372 @@
 #include <Wire.h>
 #include "Adafruit_TCS34725.h"
 #include <GY521.h>
-#include "SerialDebug.h" //https://github.com/JoaoLopesF/SerialDebug
-
+#include "SerialDebug.h"
 #include <NewPing.h>
 
-#define TRIGGER_PIN  48  // Arduino pin tied to trigger pin on the ultrasonic sensor.
-#define ECHO_PIN     49  // Arduino pin tied to echo pin on the ultrasonic sensor.
-#define MAX_DISTANCE 50 // Maximum distance we want to ping for (in centimeters). Maximum sensor distance is rated at 400-500cm.
-
-NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE); // NewPing setup of pins and maximum distance.
-
-int tempopre90 = 1000;
-int tempoOrbita = 2000;
-
-#define TCAADDR 0x70         // Endereço do TCA9548A
-GY521 mpu(0x68);             // Endereço padrão do MPU6050
-
+// Configurações de hardware
+#define TRIGGER_PIN  48
+#define ECHO_PIN     49
+#define MAX_DISTANCE 50
+#define TCAADDR 0x70
 #define DIREITA 0
 #define ESQUERDA 1
+#define LEDA 46
+#define LEDB 47
 
-// Definição dos motores
+// Constantes de configuração
+#define TEMPO_PRE90 1000
+#define TEMPO_ORBITA 2000
+#define VEL_NORMAL 88
+#define VEL_RESISTENCIA 120
+#define VEL_CURVA 140
+#define VEL_CURVA_EXTREMA 220
+#define INTERVALO_LEITURA 50
+#define DISTANCIA_OBSTACULO 10
+
+// Limiares dos sensores
+#define LIMIAR_EXT_ESQ 240
+#define LIMIAR_CENT_ESQ 110
+#define LIMIAR_CENT_DIR 110
+#define LIMIAR_EXT_DIR 140
+
+// Estados do robô
+enum Estado {
+  SEGUINDO_LINHA,
+  RESOLVENDO_BIFURCACAO,
+  DESVIANDO_OBSTACULO,
+  INICIALIZANDO
+};
+
+// Estruturas de dados
+struct Sensor {
+  uint8_t pin;
+  uint16_t limiar;
+  uint8_t valor;
+};
+
+struct CorSensor {
+  Adafruit_TCS34725 tcs;
+  bool inicializado = false;
+};
+
+// Variáveis globais
+NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
+GY521 mpu(0x68);
+Estado estadoAtual = INICIALIZANDO;
+unsigned long ultimoTempoLeitura = 0;
+
 AF_DCMotor motorFrenteEsquerdo(4);
 AF_DCMotor motorFrenteDireito(1);
 AF_DCMotor motorTrasEsquerdo(3);
 AF_DCMotor motorTrasDireito(2);
 
-Adafruit_TCS34725* tcs0 = nullptr;
-Adafruit_TCS34725* tcs1 = nullptr;
+Sensor sensores[4] = {
+  {A0, LIMIAR_EXT_ESQ, 0},  // extEsq
+  {A1, LIMIAR_CENT_ESQ, 0}, // centEsq
+  {A2, LIMIAR_CENT_DIR, 0}, // centDir
+  {A3, LIMIAR_EXT_DIR, 0}   // extDir
+};
 
-bool VerdeA;
-bool VerdeB;
+CorSensor corSensores[2];
+Adafruit_TCS34725 tcs0(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
+Adafruit_TCS34725 tcs1(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
 
-const int LEDA = 46;
-const int LEDB = 47;
-
-// Pinos dos sensores
-const int sensorExtEsquerdo = A0;
-const int sensorCentEsquerdo = A1;
-const int sensorCentDireito = A2;
-const int sensorExtDireito = A3;
-// Variáveis globais dos sensores (valores binários: 0 ou 1)
-int extEsq = 0;
-int centEsq = 0;
-int centDir = 0;
-int extDir = 0;
-
-// Limiar para detecção de linha
-// Limiar individual para cada sensor
-const int limiarExtEsq  = 240;
-const int limiarCentEsq = 110;
-const int limiarCentDir = 110;
-const int limiarExtDir  = 140;
-
-const int velocidadeNormal = 88;
-const int velocidadeResistencia = 120;
-const int velocidadeCurva = 140;
-const int velocidadeCurvaExtrema = 220;
-
-void desligarLEDs(){
-  digitalWrite(LEDA, LOW);
-  digitalWrite(LEDB, LOW);
-  delay(200);
-}
-
-void ligarLEDs(){
-  digitalWrite(LEDA, HIGH);
-  digitalWrite(LEDB, HIGH);
-  delay(200);
-}
-
-// Seleciona o canal do TCA9548A
-void tcaSelect(uint8_t channel) {
-  if (channel > 7) return;
-  Wire.beginTransmission(TCAADDR);
-  Wire.write(1 << channel);
-  Wire.endTransmission();
-}
-
-// Função que retorna true se a cor detectada for verde
-String detectarCor(uint8_t canal) {
-  tcaSelect(canal);
-  delay(10); // espera o sensor estar pronto
-
-  Adafruit_TCS34725* tcs;
-
-  if (canal == 0) {
-    if (tcs0 == nullptr)
-      tcs0 = new Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
-    tcs = tcs0;
-  } else if (canal == 1) {
-    if (tcs1 == nullptr)
-      tcs1 = new Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
-    tcs = tcs1;
-  } else {
-    printE("O sensor especificado não existe!")
-    return "erro";
-  }
-
-  if (!tcs->begin()) {
-    printE("Sensor no canal ");
-    printE(canal);
-    printlnE(" não encontrado.");
-    return "erro";
-  }
-
-  uint16_t r, g, b, c;
-  tcs->getRawData(&r, &g, &b, &c);
-
-  printV("Canal ");
-  printV(canal);
-  printV(" - R: "); printV(r);
-  printV(" G: "); printV(g);
-  printV(" B: "); printV(b);
-  printV(" C: "); printlnV(c);
-
-  // PRETO: todos os canais baixos
-  if (r < 3000 && g < 4400 && b < 3400) {
-    return "preto";
-  }
-
-  // VERDE: verde é significativamente maior que vermelho e azul
-  if (r > 6000 && g > 7500 && b > 6500) {
-    return "branco";
-  }
-
-  // Caso contrário
-  return "colorido";
-}
-
-
-// Função para calcular a posição da linha
-float calcularPosicaoLinha() {
-  // Não há nenhuma maneira de centesq e centdir juntos não ser bifurcação, e acho que é isso que tá causando ele n parar lá, além disso, colocar ele antes de tudo economiza tempo
-  // 
-  int totalAtivos = extEsq + centEsq + centDir + extDir;
-
-  if (totalAtivos == 4 || extEsq == 1 && extDir == 1) {
-    pararMotores();
-    return 69;
-  }
-
-  if (totalAtivos == 0) return 0; // Nenhum sensor ativ  
-
-  // Atribui pesos aos sensores (esquerda: negativo, direita: positivo)
-  float somaIndices = (extEsq * -2) + (centEsq * -1) + (centDir * 1) + (extDir * 2);
-
-  return somaIndices / float(totalAtivos);
-}
-
-void vencerResistenciaInicial() {
-  // Impulso inicial com velocidade máxima
-  motorFrenteEsquerdo.setSpeed(velocidadeResistencia);
-  motorFrenteDireito.setSpeed(velocidadeResistencia);
-  motorTrasEsquerdo.setSpeed(velocidadeResistencia);
-  motorTrasDireito.setSpeed(velocidadeResistencia);
-  
-  motorFrenteEsquerdo.run(FORWARD);
-  motorFrenteDireito.run(FORWARD);
-  motorTrasEsquerdo.run(FORWARD);
-  motorTrasDireito.run(FORWARD);
-  
-  delay(100);  // Duração do impulso
-}
-
-void lerSensores() {
-  int valorExtEsq = analogRead(sensorExtEsquerdo);
-  int valorCentEsq = analogRead(sensorCentEsquerdo);
-  int valorCentDir = analogRead(sensorCentDireito);
-  int valorExtDir = analogRead(sensorExtDireito);
-
-  extEsq  = valorExtEsq  > limiarExtEsq  ? 1 : 0;
-  centEsq = valorCentEsq > limiarCentEsq ? 1 : 0;
-  centDir = valorCentDir > limiarCentDir ? 1 : 0;
-  extDir  = valorExtDir  > limiarExtDir  ? 1 : 0;
-
-  printV("extEsq:");    printV(valorExtEsq);
-  printV(" centEsq:");  printV(valorCentEsq); 
-  printV(" centDir:");  printV(valorCentDir); 
-  printV(" extDir:");   printlnV(valorExtDir);
-}
-
-// SerialDebug Library
-
-// Disable all debug ? Good to release builds (production)
-// as nothing of SerialDebug is compiled, zero overhead :-)
-// For it just uncomment the DEBUG_DISABLED
-//#define DEBUG_DISABLED true
-
-// Disable SerialDebug debugger ? No more commands and features as functions and globals
-// Uncomment this to disable it 
-//#define DEBUG_DISABLE_DEBUGGER true
-
-// Define the initial debug level here (uncomment to do it)
-//#define DEBUG_INITIAL_LEVEL DEBUG_LEVEL_VERBOSE
-
-// Disable auto function name (good if your debug yet contains it)
-//#define DEBUG_AUTO_FUNC_DISABLED true
-
-// Include SerialDebug
+// Protótipos de funções
+void setup();
+void loop();
+void lerSensores();
+float calcularPosicaoLinha();
+const char* detectarCor(uint8_t canal);
+void controlarMotores(int esqFrente, int dirFrente, int velocidade = VEL_NORMAL);
+void pararMotores();
+void andarReto();
+void andarRapido();
+void andarTras();
+void virar(int direcao);
+void virarForte(int direcao);
+void virarComGiro(float anguloAlvo, int direcao);
+void vencerResistenciaInicial();
+void desligarLEDs();
+void ligarLEDs();
+void tcaSelect(uint8_t channel);
+void resolverBifurcacao();
+void desviarObstaculo();
 
 void setup() {
   Serial.begin(9600);
   printlnA("Iniciando seguidor de linha...");
   Wire.begin();
 
-  printlnV("Iniciando MPU...")
+  // Inicialização MPU6050
   mpu.begin();
-  mpu.setAccelSensitivity(0);  //  2g
-  mpu.setGyroSensitivity(0);   //  250 degrees/s
+  mpu.setAccelSensitivity(0);
+  mpu.setGyroSensitivity(0);
   mpu.setThrottle(false);
-  mpu.calibrate(1500); // Calibra giroscópio parado
+  mpu.calibrate(1500);
 
-  printlnV("Iniciando LEDs...")
+  // Configuração LEDs
   pinMode(LEDA, OUTPUT);
   pinMode(LEDB, OUTPUT);
   desligarLEDs();
 
-  printlnV("Iniciando motores...")
-  // Inicializa os motores
-  motorFrenteEsquerdo.setSpeed(velocidadeNormal);
-  motorFrenteDireito.setSpeed(velocidadeNormal);
-  motorTrasEsquerdo.setSpeed(velocidadeNormal);
-  motorTrasDireito.setSpeed(velocidadeNormal);
-  
-  // Para todos os motores inicialmente
+  // Inicialização motores
   pararMotores();
 
-  printlnV("Iniciando sensores de linha...")
-  // Configura os pinos dos sensores como entrada
-  pinMode(sensorExtEsquerdo, INPUT);
-  pinMode(sensorCentEsquerdo, INPUT);
-  pinMode(sensorCentDireito, INPUT);
-  pinMode(sensorExtDireito, INPUT);
-  lerSensores();
-
-  printlnV("Iniciando sensor de cor...")
-  String corA = detectarCor(0);
-  String corB = detectarCor(1);
-  
-  // Pequeno delay para estabilização   
-  delay(1000);
+  // Inicialização sensores de cor
+  tcaSelect(0);
+  corSensores[0].inicializado = tcs0.begin();
+  tcaSelect(1);
+  corSensores[1].inicializado = tcs1.begin();
 
   vencerResistenciaInicial();
-
-#ifndef DEBUG_DISABLE_DEBUGGER
-
-  // Add Functions and global variables to SerialDebug
-
-  // Add functions that can called from SerialDebug
-
-  //debugAddFunctionVoid(F("function"), &function); // Example for function without args
-  //debugAddFunctionStr(F("function"), &function); // Example for function with one String arg
-  //debugAddFunctionInt(F("function"), &function); // Example for function with one int arg
-
-  // Add global variables that can showed/changed from SerialDebug
-  // Note: Only global, if pass local for SerialDebug, can be dangerous
-
-  debugAddGlobalInt(F("tempopre90"), &tempopre90);
-  debugAddGlobalInt(F("tempoOrbita"), &tempoOrbita);
-  debugAddGlobalInt(F("extEsq"), &extEsq);
-  debugAddGlobalInt(F("centEsq"), &centEsq);
-  debugAddGlobalInt(F("centDir"), &centDir);
-  debugAddGlobalInt(F("extDir"), &extDir);
-
-#endif // DEBUG_DISABLE_DEBUGGER
-
+  estadoAtual = SEGUINDO_LINHA;
+/*
+  // Configuração SerialDebug
+  #ifndef DEBUG_DISABLE_DEBUGGER
+  debugAddGlobalInt(F("TEMPO_PRE90"), &TEMPO_PRE90);
+  debugAddGlobalInt(F("TEMPO_ORBITA"), &TEMPO_ORBITA);
+  for(int i = 0; i < 4; i++) {
+    debugAddGlobalInt((String("sensor") + i).c_str(), &sensores[i].valor);
+  }
+  #endif
+*/
 }
 
 void loop() {
-
-  // SerialDebug handle
-  // Notes: if in inactive mode (until receive anything from serial),
-  // it show only messages of always or errors level type
-  // And the overhead during inactive mode is very low
-  // Only if not DEBUG_DISABLED
-
   debugHandle();
 
-  mpu.readGyro();
-  
-  printV(mpu.getYaw());
-
-  if (mpu.getYaw() > 185); { // TODO: Verificar angulo de quando está inclinado
-    andarRapido();
-    return;
+  // Máquina de estados principal
+  switch(estadoAtual) {
+    case INICIALIZANDO:
+      estadoAtual = SEGUINDO_LINHA;
+      break;
+      
+    case SEGUINDO_LINHA:
+      if(millis() - ultimoTempoLeitura >= INTERVALO_LEITURA) {
+        lerSensores();
+        ultimoTempoLeitura = millis();
+        
+        float media = calcularPosicaoLinha();
+        
+        // Verificação de obstáculo
+        int distancia = sonar.ping_cm();
+        if(distancia < DISTANCIA_OBSTACULO && distancia != 0) {
+          estadoAtual = DESVIANDO_OBSTACULO;
+          break;
+        }
+        
+        // Verificação de bifurcação
+        if(media == 69) {
+          estadoAtual = RESOLVENDO_BIFURCACAO;
+          break;
+        }
+        
+        // Controle normal de seguimento
+        if(media < -1.5) virarForte(ESQUERDA);
+        else if(media > 1.5) virarForte(DIREITA);
+        else if(media < -0.7) virar(ESQUERDA);
+        else if(media > 0.7) virar(DIREITA);
+        else andarReto();
+      }
+      break;
+      
+    case RESOLVENDO_BIFURCACAO:
+      resolverBifurcacao();
+      estadoAtual = SEGUINDO_LINHA;
+      break;
+      
+    case DESVIANDO_OBSTACULO:
+      desviarObstaculo();
+      estadoAtual = SEGUINDO_LINHA;
+      break;
   }
+}
 
-  lerSensores();
+void lerSensores() {
+  for(int i = 0; i < 4; i++) {
+    sensores[i].valor = analogRead(sensores[i].pin) > sensores[i].limiar ? 1 : 0;
+    printV("Sensor"); printV(i); printV(":"); printlnV(analogRead(sensores[i].pin));
+  }
+}
 
-  float media = calcularPosicaoLinha();
+float calcularPosicaoLinha() {
+  int total = sensores[0].valor + sensores[1].valor + sensores[2].valor + sensores[3].valor;
   
-  printV("Posição média: ");
-  printlnV(media);
+  if(total == 4 || (sensores[0].valor && sensores[3].valor)) {
+    pararMotores();
+    return 69; // Código especial para bifurcação
+  }
+  
+  if(total == 0) return 0;
+  
+  return (sensores[0].valor * -2 + sensores[1].valor * -1 + 
+          sensores[2].valor * 1 + sensores[3].valor * 2) / (float)total;
+}
 
-  reverificar:
+const char* detectarCor(uint8_t canal) {
+  if(canal > 1 || !corSensores[canal].inicializado) return "erro";
+  
+  tcaSelect(canal);
+  uint16_t r, g, b, c;
+  corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
+  
+  if(r < 3000 && g < 4400 && b < 3400) return "preto";
+  if(r > 6000 && g > 7500 && b > 6500) return "branco";
+  return "colorido";
+}
 
-
-  if (media == 69) {
-  /*    
-  pararMotores();
-    delay(50);
+void resolverBifurcacao() {
+  ligarLEDs();
+  const char* corA = detectarCor(0);
+  const char* corB = detectarCor(1);
+  desligarLEDs();
+  
+  vencerResistenciaInicial();
+  
+  if(strcmp(corA, "preto") == 0 && strcmp(corB, "preto") == 0) {
     andarTras();
-    delay(750);
-
-
-    pararMotores();
-    delay(50);
-    */
-    ligarLEDs();
-
-    String corA = detectarCor(0);
-    String corB = detectarCor(1);
-
-    desligarLEDs();
-
-    vencerResistenciaInicial();
-
-    if (corA == "preto" && corB == "preto") {
-      printlnV("preto A && preto B");
-      andarTras();  // ou qualquer ação especial
-      delay(500);
-    }
-    else if (corA == "preto" && corB != "preto") {
-      virarForte(DIREITA);
-      delay(50);
-    
-      goto reverificar;
-    }
-    else if (corA != "preto" && corB == "preto") {
-      virarForte(ESQUERDA);
-      delay(50);
-      goto reverificar;
-    }
-    else if (corA == "colorido" && corB != "colorido") {
-      andarReto();
-      delay(tempopre90);
-      printlnV("colorido A && não colorido B");
-      virarComGiro(90, ESQUERDA);
-    }
-    else if (corA != "colorido" && corB == "colorido") {
-      andarReto();
-      delay(tempopre90);
-      printlnV("não colorido A && colorido B");
-      virarComGiro(90, DIREITA);
-    }
-    else if (corA == "colorido" && corB == "colorido") {
-      printlnV("colorido A && colorido B");
-      virarComGiro(90, DIREITA);
-      virarComGiro(90, DIREITA);
-    }
-    else {
-      printlnV("nenhum colorido e nenhum preto ao mesmo tempo");
-      andarReto();
-      delay(1350);
-    }
-
-    return;
+    delay(500);
   }
-
-  int distance = sonar.ping_cm();
-  printV("Distância: ");
-  printlnV(distance);
-
-  if (distance < 10 && distance != 0 ) {
-    printlnV("Distância < 25: iniciando manobra de busca por linha.");
-
-    pararMotores();
-    delay(100);
-    virarComGiro(90, ESQUERDA);
-    pararMotores();
-    delay(100);
-
-
-    andarReto();
-    delay(tempoOrbita / 2);
-
-    // Vira 90 graus à esquerda
-    unsigned long ultimaVirada = millis();
-
-    while (true) {
-      lerSensores();
-
-      if (extEsq || centEsq || centDir || extDir) {
-        printlnV("Linha encontrada!");
-        pararMotores();
-        virarComGiro(90, ESQUERDA);
-        return;
-      }
-
-      andarReto();
-
-      // Verifica se já se passaram 2000 ms desde a última virada
-      if (millis() - ultimaVirada >= 2000) {
-        pararMotores();
-        delay(100);
-        printlnV("Virando 90 graus para buscar linha...");
-        virarComGiro(90, DIREITA);
-        pararMotores();
-        delay(100);
-        ultimaVirada = millis();
-      }
-
-      delay(10);  // Pequeno delay para não travar o loop
-    }
-  } 
-
-  if (extEsq && centEsq) {
-    andarReto();
-    delay(tempopre90);
-    printlnV("Dois sensores da ESQUERDA ativados: giro 90° esquerda");
-    virarComGiro(90, ESQUERDA);
-    return;
-  }
-  else if (extDir && centDir) {
-    andarReto();
-    delay(tempopre90);
-    printlnV("Dois sensores da DIREITA ativados: giro 90° direita");
-    virarComGiro(90, DIREITA);
-    return;
-  }
-  if (media < -1.5) {
-    virarForte(ESQUERDA);
-    printlnV("Virar forte para esquerda");
-  } 
-  else if (media > 1.5) {
+  else if(strcmp(corA, "preto") == 0) {
     virarForte(DIREITA);
-    printlnV("Virar forte para direita");
-  } 
-  else if (media < -0.7) {
-    virar(ESQUERDA);
-    printlnV("Virar para esquerda");
-  } 
-  else if (media > 0.7) {
-    virar(DIREITA);
-    printlnV("Virar para direita");
-  } 
+    delay(50);
+  }
+  else if(strcmp(corB, "preto") == 0) {
+    virarForte(ESQUERDA);
+    delay(50);
+  }
+  else if(strcmp(corA, "colorido") == 0 && strcmp(corB, "colorido") != 0) {
+    andarReto();
+    delay(TEMPO_PRE90);
+    virarComGiro(90, ESQUERDA);
+  }
+  else if(strcmp(corA, "colorido") != 0 && strcmp(corB, "colorido") == 0) {
+    andarReto();
+    delay(TEMPO_PRE90);
+    virarComGiro(90, DIREITA);
+  }
+  else if(strcmp(corA, "colorido") == 0 && strcmp(corB, "colorido") == 0) {
+    virarComGiro(90, DIREITA);
+    virarComGiro(90, DIREITA);
+  }
   else {
     andarReto();
-    printlnV("Seguir reto");
-  }
-  delay(50);
-
-
-}
-
-void andarReto() {
-  motorFrenteEsquerdo.setSpeed(velocidadeNormal);
-  motorFrenteDireito.setSpeed(velocidadeNormal);
-  motorTrasEsquerdo.setSpeed(velocidadeNormal);
-  motorTrasDireito.setSpeed(velocidadeNormal);
-  
-  // Usa todos os motores para andar reto
-  motorTrasEsquerdo.run(FORWARD);
-  motorTrasDireito.run(FORWARD);
-  motorFrenteEsquerdo.run(FORWARD);
-  motorFrenteDireito.run(FORWARD);
-}
-
-void andarRapido() {
-  const int velocidadeRapida = 200;
-  
-  motorFrenteEsquerdo.setSpeed(velocidadeRapida);
-  motorFrenteDireito.setSpeed(velocidadeRapida);
-  motorTrasEsquerdo.setSpeed(velocidadeRapida);
-  motorTrasDireito.setSpeed(velocidadeRapida);
-  
-  // Usa todos os motores para andar reto
-  motorTrasEsquerdo.run(FORWARD);
-  motorTrasDireito.run(FORWARD);
-  motorFrenteEsquerdo.run(FORWARD);
-  motorFrenteDireito.run(FORWARD);
-
-}
-
-void andarTras(){
-  motorFrenteEsquerdo.setSpeed(velocidadeNormal + 10);
-  motorFrenteDireito.setSpeed(velocidadeNormal + 10);
-  motorTrasEsquerdo.setSpeed(velocidadeNormal + 10);
-  motorTrasDireito.setSpeed(velocidadeNormal + 10);
-  
-  // Usa todos os motores para andar reto
-  motorTrasEsquerdo.run(BACKWARD);
-  motorTrasDireito.run(BACKWARD);
-  motorFrenteEsquerdo.run(BACKWARD);
-  motorFrenteDireito.run(BACKWARD);
-}
-
-void virar(int direcao) {
-  if (direcao == DIREITA) {
-    // Virar para direita (motores esquerdos para frente, direitos para trás)
-    motorTrasEsquerdo.run(FORWARD);
-    motorFrenteEsquerdo.run(FORWARD);
-    motorTrasDireito.run(BACKWARD);
-    motorFrenteDireito.run(BACKWARD);
-    
-    // Ajusta velocidades
-    motorTrasEsquerdo.setSpeed(velocidadeCurva);
-    motorFrenteEsquerdo.setSpeed(velocidadeCurva);
-    motorTrasDireito.setSpeed(velocidadeCurva);
-    motorFrenteDireito.setSpeed(velocidadeCurva);
-  } 
-  else {
-    // Virar para esquerda (motores direitos para frente, esquerdos para trás)
-    motorTrasDireito.run(FORWARD);
-    motorFrenteDireito.run(FORWARD);
-    motorTrasEsquerdo.run(BACKWARD);
-    motorFrenteEsquerdo.run(BACKWARD);
-    
-    // Ajusta velocidades
-    motorTrasDireito.setSpeed(velocidadeCurva);
-    motorFrenteDireito.setSpeed(velocidadeCurva);
-    motorTrasEsquerdo.setSpeed(velocidadeCurva);
-    motorFrenteEsquerdo.setSpeed(velocidadeCurva);
+    delay(1350);
   }
 }
 
-void virarForte(int direcao) {
-  if (direcao == DIREITA) {
-    // Virar fortemente para direita
-    motorTrasEsquerdo.setSpeed(velocidadeCurvaExtrema);
-    motorFrenteEsquerdo.setSpeed(velocidadeCurvaExtrema);
-    motorTrasDireito.setSpeed(velocidadeCurvaExtrema);
-    motorFrenteDireito.setSpeed(velocidadeCurvaExtrema);
-
-    motorTrasEsquerdo.run(FORWARD);
-    motorFrenteEsquerdo.run(FORWARD);
-    motorTrasDireito.run(BACKWARD);
-    motorFrenteDireito.run(BACKWARD);
-  } 
-  else {
-    // Virar fortemente para esquerda
-    motorTrasDireito.setSpeed(velocidadeCurvaExtrema);
-    motorFrenteDireito.setSpeed(velocidadeCurvaExtrema);
-    motorTrasEsquerdo.setSpeed(velocidadeCurvaExtrema);
-    motorFrenteEsquerdo.setSpeed(velocidadeCurvaExtrema);
-
-    motorTrasDireito.run(FORWARD);
-    motorFrenteDireito.run(FORWARD);
-    motorTrasEsquerdo.run(BACKWARD);
-    motorFrenteEsquerdo.run(BACKWARD);
-  }
-}
-
-void virarComGiro(float anguloAlvo, int direcao) {
-    float yawInicial = mpu.getYaw();
-    float alvoYaw = fmod((yawInicial + anguloAlvo), 360);  // ou corrigir caso dê < 0
-    
-    while (true) {
-      mpu.readGyro();
-      float yawAtual = fmod(mpu.getYaw(), 360);
-      float delta = fmod((yawAtual - alvoYaw + 360), 360);
-    
-      // Quando delta estiver pequeno o suficiente, atingimos o alvo
-      if (delta < 5 || delta > 355) break;
-    
-      if (direcao == DIREITA) virar(DIREITA);
-      else virar(ESQUERDA);
-    
-      printV("Yaw: ");
-      printlnV(yawAtual);
-      delay(10);
+void desviarObstaculo() {
+  pararMotores();
+  delay(100);
+  virarComGiro(90, ESQUERDA);
+  pararMotores();
+  delay(100);
+  
+  andarReto();
+  delay(TEMPO_ORBITA / 2);
+  
+  unsigned long ultimaVirada = millis();
+  
+  while(true) {
+    lerSensores();
+    if(sensores[0].valor || sensores[1].valor || sensores[2].valor || sensores[3].valor) {
+      pararMotores();
+      virarComGiro(90, ESQUERDA);
+      return;
     }
+    
+    andarReto();
+    
+    if(millis() - ultimaVirada >= 2000) {
+      pararMotores();
+      delay(100);
+      virarComGiro(90, DIREITA);
+      pararMotores();
+      delay(100);
+      ultimaVirada = millis();
+    }
+    
+    delay(10);
+  }
+}
+
+void controlarMotores(int esqFrente, int dirFrente, int velocidade) {
+  motorFrenteEsquerdo.setSpeed(velocidade);
+  motorFrenteDireito.setSpeed(velocidade);
+  motorTrasEsquerdo.setSpeed(velocidade);
+  motorTrasDireito.setSpeed(velocidade);
+  
+  motorFrenteEsquerdo.run(esqFrente ? FORWARD : BACKWARD);
+  motorTrasEsquerdo.run(esqFrente ? FORWARD : BACKWARD);
+  motorFrenteDireito.run(dirFrente ? FORWARD : BACKWARD);
+  motorTrasDireito.run(dirFrente ? FORWARD : BACKWARD);
 }
 
 void pararMotores() {
-  motorTrasEsquerdo.run(RELEASE);
   motorFrenteEsquerdo.run(RELEASE);
-  motorTrasDireito.run(RELEASE);
   motorFrenteDireito.run(RELEASE);
+  motorTrasEsquerdo.run(RELEASE);
+  motorTrasDireito.run(RELEASE);
+}
+
+void andarReto() {
+  controlarMotores(1, 1, VEL_NORMAL);
+}
+
+void andarRapido() {
+  controlarMotores(1, 1, 200);
+}
+
+void andarTras() {
+  controlarMotores(0, 0, VEL_NORMAL + 10);
+}
+
+void virar(int direcao) {
+  controlarMotores(direcao, !direcao, VEL_CURVA);
+}
+
+void virarForte(int direcao) {
+  controlarMotores(direcao, !direcao, VEL_CURVA_EXTREMA);
+}
+
+void virarComGiro(float anguloAlvo, int direcao) {
+  float yawInicial = mpu.getYaw();
+  float alvoYaw = fmod((yawInicial + (direcao == DIREITA ? anguloAlvo : -anguloAlvo) + 360), 360);
+  
+  while(true) {
+    mpu.readGyro();
+    float yawAtual = fmod(mpu.getYaw(), 360);
+    float delta = fmod((yawAtual - alvoYaw + 360), 360);
+    
+    if(delta < 5 || delta > 355) break;
+    
+    virar(direcao);
+    delay(10);
+  }
+  pararMotores();
+}
+
+void vencerResistenciaInicial() {
+  controlarMotores(1, 1, VEL_RESISTENCIA);
+  delay(100);
+}
+
+void desligarLEDs() {
+  digitalWrite(LEDA, LOW);
+  digitalWrite(LEDB, LOW);
+  delay(200);
+}
+
+void ligarLEDs() {
+  digitalWrite(LEDA, HIGH);
+  digitalWrite(LEDB, HIGH);
+  delay(200);
+}
+
+void tcaSelect(uint8_t channel) {
+  if(channel > 7) return;
+  Wire.beginTransmission(TCAADDR);
+  Wire.write(1 << channel);
+  Wire.endTransmission();
 }
