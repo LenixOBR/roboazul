@@ -11,6 +11,12 @@
 // Instalar QTR no chão, entre as rodas
 // Mover os sensores de cor para trás
 
+// TODO:
+// Verificar se ele detecta tudo bonitinho
+// Concertar todas as desgraças que vão com certeza aparecer,
+// porque este código não foi testado ainda em hardware
+// eu realmente espero que a gente termine a tempo.
+
 
 // Configurações de hardware
 #define TRIGGER_PIN  48
