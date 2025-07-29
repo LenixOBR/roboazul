@@ -4,7 +4,6 @@
 #include <GY521.h>
 #include "SerialDebug.h" //https://github.com/JoaoLopesF/SerialDebug
 
-
 #include <NewPing.h>
 
 #define TRIGGER_PIN  48  // Arduino pin tied to trigger pin on the ultrasonic sensor.
@@ -15,7 +14,6 @@ NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE); // NewPing setup of pins and
 
 int tempopre90 = 1000;
 int tempoOrbita = 2000;
-
 
 #define TCAADDR 0x70         // Endereço do TCA9548A
 GY521 mpu(0x68);             // Endereço padrão do MPU6050
@@ -35,7 +33,6 @@ Adafruit_TCS34725* tcs1 = nullptr;
 bool VerdeA;
 bool VerdeB;
 
-
 const int LEDA = 46;
 const int LEDB = 47;
 
@@ -49,7 +46,6 @@ int extEsq = 0;
 int centEsq = 0;
 int centDir = 0;
 int extDir = 0;
-
 
 // Limiar para detecção de linha
 // Limiar individual para cada sensor
@@ -205,8 +201,6 @@ void lerSensores() {
 
 // Include SerialDebug
 
-
-
 void setup() {
   Serial.begin(9600);
   printlnA("Iniciando seguidor de linha...");
@@ -296,7 +290,8 @@ void loop() {
 
 
   if (media == 69) {
-/*    pararMotores();
+  /*    
+  pararMotores();
     delay(50);
     andarTras();
     delay(750);
@@ -314,7 +309,6 @@ void loop() {
 
     vencerResistenciaInicial();
 
-    
     if (corA == "preto" && corB == "preto") {
       printlnV("preto A && preto B");
       andarTras();  // ou qualquer ação especial
@@ -404,7 +398,6 @@ void loop() {
     }
   } 
 
-  
   if (extEsq && centEsq) {
     andarReto();
     delay(tempopre90);
@@ -444,7 +437,6 @@ void loop() {
 
 }
 
-
 void andarReto() {
   motorFrenteEsquerdo.setSpeed(velocidadeNormal);
   motorFrenteDireito.setSpeed(velocidadeNormal);
@@ -470,7 +462,6 @@ void andarTras(){
   motorFrenteEsquerdo.run(BACKWARD);
   motorFrenteDireito.run(BACKWARD);
 }
-
 
 void virar(int direcao) {
   if (direcao == DIREITA) {
@@ -548,9 +539,6 @@ void virarComGiro(float anguloAlvo, int direcao) {
       delay(10);
     }
 }
-
-
-
 
 void pararMotores() {
   motorTrasEsquerdo.run(RELEASE);
