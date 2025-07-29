@@ -144,32 +144,29 @@ void loop() {
       break;
       
     case SEGUINDO_LINHA:
-      if(millis() - ultimoTempoLeitura >= INTERVALO_LEITURA) {
-        lerSensores();
-        ultimoTempoLeitura = millis();
+      lerSensores();
         
-        float media = calcularPosicaoLinha();
+      float media = calcularPosicaoLinha();
         
         // Verificação de obstáculo
-        int distancia = sonar.ping_cm();
-        if(distancia < DISTANCIA_OBSTACULO && distancia != 0) {
-          estadoAtual = DESVIANDO_OBSTACULO;
-          break;
-        }
+      int distancia = sonar.ping_cm();
+      if(distancia < DISTANCIA_OBSTACULO && distancia != 0) {
+        estadoAtual = DESVIANDO_OBSTACULO;
+        break;
+      }
         
         // Verificação de bifurcação
-        if(media == 69) {
-          estadoAtual = RESOLVENDO_BIFURCACAO;
-          break;
-        }
-        
-        // Controle normal de seguimento
-        if(media < -1.5) virarForte(ESQUERDA);
-        else if(media > 1.5) virarForte(DIREITA);
-        else if(media < -0.7) virar(ESQUERDA);
-        else if(media > 0.7) virar(DIREITA);
-        else andarReto();
+      if(media == 69) {
+        estadoAtual = RESOLVENDO_BIFURCACAO;
+        break;
       }
+        
+      // Controle normal de seguimento
+      if(media < -1.5) virarForte(ESQUERDA);
+      else if(media > 1.5) virarForte(DIREITA);
+      else if(media < -0.7) virar(ESQUERDA);
+      else if(media > 0.7) virar(DIREITA);
+      else andarReto();
       break;
       
     case RESOLVENDO_BIFURCACAO:
