@@ -279,6 +279,15 @@ void loop() {
 
   debugHandle();
 
+  mpu.readGyro();
+  
+  printV(mpu.getYaw());
+
+  if (mpu.getYaw() > 185); { // TODO: Verificar angulo de quando está inclinado
+    andarRapido();
+    return;
+  }
+
   lerSensores();
 
   float media = calcularPosicaoLinha();
@@ -448,6 +457,22 @@ void andarReto() {
   motorTrasDireito.run(FORWARD);
   motorFrenteEsquerdo.run(FORWARD);
   motorFrenteDireito.run(FORWARD);
+}
+
+void andarRapido() {
+  const int velocidadeRapida = 200;
+  
+  motorFrenteEsquerdo.setSpeed(velocidadeRapida);
+  motorFrenteDireito.setSpeed(velocidadeRapida);
+  motorTrasEsquerdo.setSpeed(velocidadeRapida);
+  motorTrasDireito.setSpeed(velocidadeRapida);
+  
+  // Usa todos os motores para andar reto
+  motorTrasEsquerdo.run(FORWARD);
+  motorTrasDireito.run(FORWARD);
+  motorFrenteEsquerdo.run(FORWARD);
+  motorFrenteDireito.run(FORWARD);
+
 }
 
 void andarTras(){
