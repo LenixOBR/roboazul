@@ -4,12 +4,7 @@
 #include <GY521.h>
 #include "SerialDebug.h"
 #include <NewPing.h>
-<<<<<<< HEAD
-
-=======
-#include <QTRSensors.h>
 #include <Servo.h>
->>>>>>> be0b4be (recurso: Adicionar código da sala de resgate)
 // Modificações:
 // Trocar GY-521 para conexão direta
 // Instalar QTR no chão, entre as rodas
@@ -36,13 +31,11 @@
 #define INTERVALO_LEITURA 50
 #define DISTANCIA_OBSTACULO 10
 
-<<<<<<< HEAD
 // Limiares dos sensores
 #define LIMIAR_EXT_ESQ 240
 #define LIMIAR_CENT_ESQ 110
 #define LIMIAR_CENT_DIR 110
 #define LIMIAR_EXT_DIR 140
-=======
 #define SERVO_PIN 10
 #define ANGULO_FRENTE 90
 #define ANGULO_ESQUERDA 180
@@ -51,7 +44,6 @@
 #define DISTANCIA_MINIMA_VIRADA 10
 
 Servo servoUltrassonico;
->>>>>>> be0b4be (recurso: Adicionar código da sala de resgate)
 
 // Estados do robô
 enum Estado {
@@ -136,8 +128,6 @@ void setup() {
   // Inicialização motores
   pararMotores();
 
-<<<<<<< HEAD
-=======
   //Inicialização sala de resgate
   servoUltrassonico.attach(SERVO_PIN);
   servoUltrassonico.write(ANGULO_FRENTE);
@@ -145,7 +135,6 @@ void setup() {
   // Calibração dos sensores QTR
   calibrarSensores();
 
->>>>>>> be0b4be (recurso: Adicionar código da sala de resgate)
   // Inicialização sensores de cor
   tcaSelect(0);
   corSensores[0].inicializado = tcs0.begin();
@@ -210,8 +199,6 @@ void loop() {
       desviarObstaculo();
       estadoAtual = SEGUINDO_LINHA;
       break;
-<<<<<<< HEAD
-=======
     
     case SALA_DE_RESGATE:
       executarComportamentoSalaResgate();
@@ -220,7 +207,6 @@ void loop() {
     case PARADO:
       pararMotores();
       break;
->>>>>>> be0b4be (recurso: Adicionar código da sala de resgate)
   }
 }
 
@@ -385,7 +371,6 @@ void virarComGiro(float anguloAlvo, int direcao) {
     virar(direcao);
     delay(10);
   }
-<<<<<<< HEAD
   pararMotores();
 }
 
@@ -411,7 +396,6 @@ void tcaSelect(uint8_t channel) {
   Wire.beginTransmission(TCAADDR);
   Wire.write(1 << channel);
   Wire.endTransmission();
-=======
 }
 
 
@@ -491,5 +475,4 @@ int lerUltrassonicoLateral(int angulo) {
   printD("): "); printlnD(distancia);
   
   return distancia;
->>>>>>> be0b4be (recurso: Adicionar código da sala de resgate)
 }
