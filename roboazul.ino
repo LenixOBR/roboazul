@@ -5,11 +5,6 @@
 #include "SerialDebug.h"
 #include <NewPing.h>
 #include <Servo.h>
-// Modificações:
-// Trocar GY-521 para conexão direta
-// Instalar QTR no chão, entre as rodas
-// Mover os sensores de cor para trás
-
 
 // Configurações de hardware
 #define TRIGGER_PIN  48
@@ -30,6 +25,8 @@
 #define VEL_CURVA_EXTREMA 220
 #define INTERVALO_LEITURA 50
 #define DISTANCIA_OBSTACULO 10
+#define DISTANCIA_PARADA 15
+#define DISTANCIA_MINIMA_VIRADA 10
 
 // Limiares dos sensores
 #define LIMIAR_EXT_ESQ 240
@@ -40,16 +37,14 @@
 #define ANGULO_FRENTE 90
 #define ANGULO_ESQUERDA 180
 #define ANGULO_DIREITA 0
-#define DISTANCIA_PARADA 15
-#define DISTANCIA_MINIMA_VIRADA 10
-
-Servo servoUltrassonico;
 
 // Estados do robô
 enum Estado {
   SEGUINDO_LINHA,
   RESOLVENDO_BIFURCACAO,
   DESVIANDO_OBSTACULO,
+  SALA_DE_RESGATE,
+  PARADO,
   INICIALIZANDO
 };
 
@@ -70,6 +65,7 @@ NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
 GY521 mpu(0x68);
 Estado estadoAtual = INICIALIZANDO;
 unsigned long ultimoTempoLeitura = 0;
+Servo servoUltrassonico;
 
 AF_DCMotor motorFrenteEsquerdo(4);
 AF_DCMotor motorFrenteDireito(1);
@@ -84,8 +80,6 @@ Sensor sensores[4] = {
 };
 
 CorSensor corSensores[2];
-Adafruit_TCS34725 tcs0(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
-Adafruit_TCS34725 tcs1(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
 
 // Protótipos de funções
 void setup();
@@ -107,6 +101,10 @@ void ligarLEDs();
 void tcaSelect(uint8_t channel);
 void resolverBifurcacao();
 void desviarObstaculo();
+void entrarSalaResgate();
+void executarComportamentoSalaResgate();
+int lerUltrassonicoFrontal();
+int lerUltrassonicoLateral(int angulo);
 
 void setup() {
   Serial.begin(9600);
@@ -128,31 +126,21 @@ void setup() {
   // Inicialização motores
   pararMotores();
 
-  //Inicialização sala de resgate
+  // Inicialização servo
   servoUltrassonico.attach(SERVO_PIN);
   servoUltrassonico.write(ANGULO_FRENTE);
 
-  // Calibração dos sensores QTR
-  calibrarSensores();
-
   // Inicialização sensores de cor
+  corSensores[0].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
+  corSensores[1].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
+  
   tcaSelect(0);
-  corSensores[0].inicializado = tcs0.begin();
+  corSensores[0].inicializado = corSensores[0].tcs.begin();
   tcaSelect(1);
-  corSensores[1].inicializado = tcs1.begin();
+  corSensores[1].inicializado = corSensores[1].tcs.begin();
 
   vencerResistenciaInicial();
   estadoAtual = SEGUINDO_LINHA;
-/*
-  // Configuração SerialDebug
-  #ifndef DEBUG_DISABLE_DEBUGGER
-  debugAddGlobalInt(F("TEMPO_PRE90"), &TEMPO_PRE90);
-  debugAddGlobalInt(F("TEMPO_ORBITA"), &TEMPO_ORBITA);
-  for(int i = 0; i < 4; i++) {
-    debugAddGlobalInt((String("sensor") + i).c_str(), &sensores[i].valor);
-  }
-  #endif
-*/
 }
 
 void loop() {
@@ -166,18 +154,17 @@ void loop() {
       
     case SEGUINDO_LINHA:
       lerSensores();
-        
       float media = calcularPosicaoLinha();
         
-        // Verificação de obstáculo
+      // Verificação de obstáculo
       int distancia = sonar.ping_cm();
       if(distancia < DISTANCIA_OBSTACULO && distancia != 0) {
         estadoAtual = DESVIANDO_OBSTACULO;
         break;
       }
         
-        // Verificação de bifurcação
-      if(media == 69) {
+      // Verificação de bifurcação
+      if(media == 69) { // Código especial para bifurcação
         estadoAtual = RESOLVENDO_BIFURCACAO;
         break;
       }
@@ -318,6 +305,60 @@ void desviarObstaculo() {
   }
 }
 
+void executarComportamentoSalaResgate() {
+  while(estadoAtual == SALA_DE_RESGATE) {
+    lerSensores();
+    float posicao = calcularPosicaoLinha();
+    
+    if(posicao != 0) { // Linha preta detectada
+      printlnA("Linha de saida detectada!");
+      pararMotores();
+      delay(1000);
+      estadoAtual = SEGUINDO_LINHA;
+      return;
+    }
+
+    andarReto();
+    
+    int distanciaFrontal = lerUltrassonicoFrontal();
+    
+    if(distanciaFrontal < DISTANCIA_PARADA && distanciaFrontal != 0) {
+      pararMotores();
+      printlnA("Obstaculo frontal detectado!");
+      
+      int distanciaEsquerda = lerUltrassonicoLateral(ANGULO_ESQUERDA);
+      delay(200);
+      int distanciaDireita = lerUltrassonicoLateral(ANGULO_DIREITA);
+      delay(200);
+      
+      servoUltrassonico.write(ANGULO_FRENTE);
+      
+      if(distanciaEsquerda > distanciaDireita) {
+        printlnA("Virando para esquerda");
+        virarComGiro(90, ESQUERDA);
+      } else {
+        printlnA("Virando para direita");
+        virarComGiro(90, DIREITA);
+      }
+      
+      andarReto();
+      delay(500);
+    }
+    
+    delay(50);
+  }
+}
+
+int lerUltrassonicoFrontal() {
+  return sonar.ping_cm();
+}
+
+int lerUltrassonicoLateral(int angulo) {
+  servoUltrassonico.write(angulo);
+  delay(300);
+  return sonar.ping_cm();
+}
+
 void controlarMotores(int esqFrente, int dirFrente, int velocidade) {
   motorFrenteEsquerdo.setSpeed(velocidade);
   motorFrenteDireito.setSpeed(velocidade);
@@ -398,81 +439,7 @@ void tcaSelect(uint8_t channel) {
   Wire.endTransmission();
 }
 
-
 void entrarSalaResgate() {
   printlnA("Entrando na sala de resgate...");
   estadoAtual = SALA_DE_RESGATE;
-}
-
-void executarComportamentoSalaResgate() {
-  while(estadoAtual == SALA_DE_RESGATE) {
-    // 1. Verificar se encontrou linha preta (saída)
-    lerSensores();
-    int posicao = calcularPosicaoLinha();
-    
-    if(posicao == -999) { // Todos sensores ativos (linha preta)
-      printlnA("Linha de saida detectada!");
-      pararMotores();
-      delay(1000);
-      estadoAtual = SEGUINDO_LINHA;
-      return;
-    }
-
-    // 2. Andar reto
-    andarReto();
-    
-    // 3. Verificar obstáculo frontal
-    int distanciaFrontal = lerUltrassonicoFrontal();
-    
-    if(distanciaFrontal < DISTANCIA_PARADA) {
-      pararMotores();
-      printlnA("Obstaculo frontal detectado!");
-      
-      // 4. Verificar lados
-      int distanciaEsquerda = lerUltrassonicoLateral(ANGULO_ESQUERDA);
-      delay(200);
-      int distanciaDireita = lerUltrassonicoLateral(ANGULO_DIREITA);
-      delay(200);
-      
-      // Retornar servo para frente
-      servoUltrassonico.write(ANGULO_FRENTE);
-      
-      // 5. Decidir direção
-      if(distanciaEsquerda > distanciaDireita) {
-        printlnA("Virando para esquerda (mais espaco)");
-        virarComGiro(90, ESQUERDA);
-      } else {
-        printlnA("Virando para direita (mais espaco)");
-        virarComGiro(90, DIREITA);
-      }
-      
-      // 6. Continuar andando
-      andarReto();
-      delay(500);
-    }
-    
-    delay(50); // Pequena pausa entre leituras
-  }
-}
-
-int lerUltrassonicoFrontal() {
-  // Já temos a função sonar.ping_cm() para o frontal
-  int distancia = sonar.ping_cm();
-  printD("Distancia frontal: "); printlnD(distancia);
-  return distancia;
-}
-
-int lerUltrassonicoLateral(int angulo) {
-  servoUltrassonico.write(angulo);
-  delay(300); // Tempo para o servo se mover
-  
-  // Criar um sensor temporário para a lateral
-  NewPing sonarLateral(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
-  int distancia = sonarLateral.ping_cm();
-  
-  printD("Distancia lateral ("); 
-  printD(angulo == ANGULO_ESQUERDA ? "esq" : "dir");
-  printD("): "); printlnD(distancia);
-  
-  return distancia;
 }
