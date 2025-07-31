@@ -92,17 +92,17 @@ void setup() {
   mpu.setGyroSensitivity(0);
   mpu.setThrottle(false);
   Log.verboseln("Calibrando, isto demora um pouco....");
-  mpu.calibrate(1500);
+  mpu.calibrate(5);
 
   Log.verboseln("Desligando LEDs....");
   pinMode(LEDA, OUTPUT);
   pinMode(LEDB, OUTPUT);
   desligarLEDs();
-/*
+
   Log.verboseln("Inicializando servo...");
   servoUltrassonico.attach(SERVO_PIN);
   servoUltrassonico.write(ANGULO_FRENTE);
-*/
+
   Log.verboseln("Inicializando sensores de cor...");
   corSensores[0].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
   corSensores[1].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
