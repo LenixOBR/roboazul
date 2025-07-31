@@ -8,7 +8,6 @@
 
 // Modificações:
 // Trocar GY-521 para conexão direta
-// Instalar QTR no chão, entre as rodas
 // Mover os sensores de cor para trás
 
 // TODO:
