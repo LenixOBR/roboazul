@@ -6,11 +6,6 @@
 #include <NewPing.h>
 #include <Servo.h>
 
-// Modificações:
-// Trocar GY-521 para conexão direta
-// Mover os sensores de cor para trás
-
-// TODO:
 // Verificar se ele detecta tudo bonitinho
 // Concertar todas as desgraças que vão com certeza aparecer,
 // porque este código não foi testado ainda em hardware
@@ -54,7 +49,7 @@ enum Estado {
   SEGUINDO_LINHA,
   RESOLVENDO_BIFURCACAO,
   DESVIANDO_OBSTACULO,
-  SALA_DE_RESGATE,
+  //SALA_DE_RESGATE,
   PARADO,
   INICIALIZANDO
 };
@@ -112,8 +107,8 @@ void ligarLEDs();
 void tcaSelect(uint8_t channel);
 void resolverBifurcacao();
 void desviarObstaculo();
-void entrarSalaResgate();
-void executarComportamentoSalaResgate();
+//void entrarSalaResgate();
+//void executarComportamentoSalaResgate();
 int lerUltrassonicoFrontal();
 int lerUltrassonicoLateral(int angulo);
 
@@ -197,11 +192,11 @@ void loop() {
       desviarObstaculo();
       estadoAtual = SEGUINDO_LINHA;
       break;
-    
+/*  
     case SALA_DE_RESGATE:
       executarComportamentoSalaResgate();
       break;
-      
+*/      
     case PARADO:
       pararMotores();
       break;
@@ -315,7 +310,7 @@ void desviarObstaculo() {
     delay(10);
   }
 }
-
+/*
 void executarComportamentoSalaResgate() {
   while(estadoAtual == SALA_DE_RESGATE) {
     lerSensores();
@@ -369,7 +364,7 @@ int lerUltrassonicoLateral(int angulo) {
   delay(300);
   return sonar.ping_cm();
 }
-
+*/
 void controlarMotores(int esqFrente, int dirFrente, int velocidade) {
   motorFrenteEsquerdo.setSpeed(velocidade);
   motorFrenteDireito.setSpeed(velocidade);
@@ -449,8 +444,9 @@ void tcaSelect(uint8_t channel) {
   Wire.write(1 << channel);
   Wire.endTransmission();
 }
-
+/*
 void entrarSalaResgate() {
   printlnA("Entrando na sala de resgate...");
   estadoAtual = SALA_DE_RESGATE;
 }
+*/
