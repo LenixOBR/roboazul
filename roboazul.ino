@@ -6,6 +6,7 @@
 #include <Servo.h>
 #include <ArduinoLog.h>
 
+
 // Configurações de hardware
 #define TRIGGER_PIN  48
 #define ECHO_PIN     49
@@ -41,12 +42,12 @@
 // Estados do robô
 enum Estado {
   SEGUINDO_LINHA,
-  RESOLVENDO_BIFURCACAO,
+  // RESOLVENDO_BIFURCACAO,
   DESVIANDO_OBSTACULO,
   PARADO,
   INICIALIZANDO
 };
-
+/*
 // Estruturas de dados
 struct Sensor {
   uint8_t pin;
@@ -65,12 +66,12 @@ GY521 mpu(0x68);
 Estado estadoAtual = INICIALIZANDO;
 unsigned long ultimoTempoLeitura = 0;
 Servo servoUltrassonico;
-
+*/
 AF_DCMotor motorFrenteEsquerdo(4);
 AF_DCMotor motorFrenteDireito(1);
 AF_DCMotor motorTrasEsquerdo(3);
 AF_DCMotor motorTrasDireito(2);
-
+/*
 Sensor sensores[4] = {
   {A0, LIMIAR_EXT_ESQ, 0},
   {A1, LIMIAR_CENT_ESQ, 0},
@@ -79,12 +80,12 @@ Sensor sensores[4] = {
 };
 
 CorSensor corSensores[2];
-
+*/
 void setup() {
   Serial.begin(9600);
   Log.begin(LOG_LEVEL_VERBOSE, &Serial);
   Log.infoln("Iniciando seguidor de linha...");
-  
+  /*
   Wire.begin();
   Log.verboseln("Calibrando MPU...");
   mpu.begin();
@@ -108,7 +109,7 @@ void setup() {
   corSensores[1].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
   tcaSelect(0); corSensores[0].inicializado = corSensores[0].tcs.begin();
   tcaSelect(1); corSensores[1].inicializado = corSensores[1].tcs.begin();
-
+  */
   Log.infoln("Sistema pronto. Entrando em modo de seguimento.");
   vencerResistenciaInicial();
   estadoAtual = SEGUINDO_LINHA;
@@ -124,7 +125,7 @@ void loop() {
     case SEGUINDO_LINHA:
       lerSensores();
       float media = calcularPosicaoLinha();
-
+/*
       int distancia = sonar.ping_cm();
       Log.verboseln("Distancia ultrassonico: %d cm", distancia);
       if(distancia < DISTANCIA_OBSTACULO && distancia != 0) {
@@ -138,14 +139,14 @@ void loop() {
         estadoAtual = RESOLVENDO_BIFURCACAO;
         break;
       }
-
+*/
       if(media < -1.5) virarForte(ESQUERDA);
       else if(media > 1.5) virarForte(DIREITA);
       else if(media < -0.7) virar(ESQUERDA);
       else if(media > 0.7) virar(DIREITA);
       else andarReto();
       break;
-
+/*
     case RESOLVENDO_BIFURCACAO:
       resolverBifurcacao();
       estadoAtual = SEGUINDO_LINHA;
@@ -155,7 +156,7 @@ void loop() {
       desviarObstaculo();
       estadoAtual = SEGUINDO_LINHA;
       break;
-
+*/
     case PARADO:
       Log.infoln("Robô parado.");
       pararMotores();
@@ -181,7 +182,7 @@ float calcularPosicaoLinha() {
   return (sensores[0].valor * -2 + sensores[1].valor * -1 + 
           sensores[2].valor * 1 + sensores[3].valor * 2) / (float)total;
 }
-
+/*
 const char* detectarCor(uint8_t canal) {
   if(canal > 1 || !corSensores[canal].inicializado) return "erro";
   tcaSelect(canal);
@@ -262,7 +263,7 @@ void desviarObstaculo() {
     delay(10);
   }
 }
-
+*/
 void controlarMotores(int esqFrente, int dirFrente, int velocidade = VEL_NORMAL) {
   motorFrenteEsquerdo.setSpeed(velocidade);
   motorFrenteDireito.setSpeed(velocidade);
@@ -287,7 +288,7 @@ void andarRapido()   { controlarMotores(1, 1, 200); }
 void andarTras()     { controlarMotores(0, 0, VEL_NORMAL + 10); }
 void virar(int d)    { controlarMotores(d, !d, VEL_CURVA); }
 void virarForte(int d){ controlarMotores(d, !d, VEL_CURVA_EXTREMA); }
-
+/*
 void virarComGiro(float anguloAlvo, int direcao) {
   float yawInicial = mpu.getYaw();
   float alvoYaw = fmod((yawInicial + (direcao == DIREITA ? anguloAlvo : -anguloAlvo) + 360), 360);
@@ -302,12 +303,12 @@ void virarComGiro(float anguloAlvo, int direcao) {
   }
   pararMotores();
 }
-
+*/
 void vencerResistenciaInicial() {
   controlarMotores(1, 1, VEL_RESISTENCIA);
   delay(100);
 }
-
+/*
 void desligarLEDs() {
   digitalWrite(LEDA, LOW);
   digitalWrite(LEDB, LOW);
@@ -326,3 +327,4 @@ void tcaSelect(uint8_t channel) {
   Wire.write(1 << channel);
   Wire.endTransmission();
 }
+*/
