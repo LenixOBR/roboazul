@@ -8,8 +8,9 @@
 
 
 // Configurações de hardware
-#define TRIGGER_PIN  48
-#define ECHO_PIN     49
+#define TRIGGER_PIN  31
+#define ECHO_PIN     32
+#define CALIB_FLAG  33
 #define MAX_DISTANCE 50
 #define TCAADDR 0x70
 #define DIREITA 0
@@ -30,10 +31,7 @@
 #define DISTANCIA_MINIMA_VIRADA 10
 
 // Limiares dos sensores
-#define LIMIAR_EXT_ESQ 240
-#define LIMIAR_CENT_ESQ 110
-#define LIMIAR_CENT_DIR 110
-#define LIMIAR_EXT_DIR 140
+
 #define SERVO_PIN 10
 #define ANGULO_FRENTE 90
 #define ANGULO_ESQUERDA 180
@@ -43,7 +41,7 @@
 enum Estado {
   SEGUINDO_LINHA,
   // RESOLVENDO_BIFURCACAO,
-  DESVIANDO_OBSTACULO,
+  // DESVIANDO_OBSTACULO,
   PARADO,
   INICIALIZANDO
 };
@@ -165,22 +163,35 @@ void loop() {
 }
 
 void lerSensores() {
-  for(int i = 0; i < 4; i++) {
-    int leitura = analogRead(sensores[i].pin);
-    sensores[i].valor = leitura > sensores[i].limiar ? 1 : 0;
-    Log.verbose("Sensor %d: %d (%s)\n", i, leitura, sensores[i].valor ? "preto" : "branco");
+  unsigned int sensorValues[8];
+  qtr.readCalibrated(sensorValues); // Lê todos os 8 sensores do QTR-8RC
+  
+  for(int i = 0; i < 8; i++) {
+    sensores[i].valor = sensorValues[i] > sensores[i].limiar ? 1 : 0;
+    Log.verbose("Sensor %d: %d (%s)\n", i, sensorValues[i], sensores[i].valor ? "preto" : "branco");
   }
 }
 
 float calcularPosicaoLinha() {
-  int total = sensores[0].valor + sensores[1].valor + sensores[2].valor + sensores[3].valor;
-  if(total == 4 || (sensores[0].valor && sensores[3].valor)) {
-    pararMotores();
-    return 69;
+  int total = 0;
+  int somaPonderada = 0;
+  
+  // Calcula o total de sensores ativos e a soma ponderada
+  for(int i = 0; i < 8; i++) {
+    total += sensores[i].valor;
+    somaPonderada += sensores[i].valor * (i - 3.5); // Pesos de -3.5 a 3.5
   }
-  if(total == 0) return 0;
-  return (sensores[0].valor * -2 + sensores[1].valor * -1 + 
-          sensores[2].valor * 1 + sensores[3].valor * 2) / (float)total;
+  
+  // Casos especiais
+  if(total == 8) { // Todos os sensores detectam preto
+    pararMotores();
+    return 69; // Código especial para linha perdida/intersecção
+  }
+  
+  if(total == 0) return 0; // Nenhum sensor detecta linha
+  
+  // Retorna a posição normalizada entre -1 e 1
+  return somaPonderada / (3.5 * total);
 }
 /*
 const char* detectarCor(uint8_t canal) {
