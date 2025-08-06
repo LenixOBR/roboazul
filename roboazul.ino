@@ -15,7 +15,6 @@
 #define TCAADDR 0x70
 #define DIREITA 0
 #define ESQUERDA 1
-#define LEDA 46
 #define LEDB 47
 
 // Constantes de configuração
