@@ -6,6 +6,7 @@
 #include <Servo.h>
 #include <ArduinoLog.h>
 #include <QTRSensors.h>
+#include <math.h>
 
 QTRSensors qtr;
 
@@ -65,7 +66,8 @@ enum Codigos {
   ERRO_TCS_DIREITA = 7,        // 0111 - Erro no sensor de cor direito
   ERRO_QTR_SATURADO = 8,       // 1000 - Erro nos sensores de linha QTR
   ERRO_I2C = 9,                // 1001 - Erro de comunicação I2C
-  OP_INICIALIZANDO = 15        // 1111 - Inicializando
+  CALIBRANDO = 10,             // 1010 - Calibrando
+  OP_INICIALIZANDO = 15     // 1111 - Inicializando
 };
 
 enum Cores {
@@ -108,7 +110,11 @@ bool sensorDefeituoso[8] = {false};
 
 void setup() {
   Serial.begin(9600);
-  Log.begin(LOG_LEVEL_VERBOSE, &Serial);
+
+  if (Serial) {
+    Log.begin(LOG_LEVEL_VERBOSE, &Serial);
+  }
+
   Log.noticeln(F("============================================="));
   Log.noticeln(F("| Iniciando sistema do seguidor de linha    |"));
   Log.noticeln(F("| Feito em 07/08/25                         |"));
@@ -120,23 +126,49 @@ void setup() {
   digitalWrite(LEDA, LOW);
   digitalWrite(LEDB, LOW);
 
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
+  pinMode(LED3, OUTPUT);
+  pinMode(LED4, OUTPUT);
+
+  // Inicialização I2C e MPU6050
+  Log.verboseln(F("Iniciando comunicação I2C..."));
+  Wire.begin();
+
+  mpu.begin();
+  for (int i = 0; i < MAX_TENTATIVAS_MPU; i++) {
+    Log.verboseln("Tentativa %d de inicializar MPU...", i+1);
+    if (verificarMPU()) break;
+    delay(100);
+  }
+  
+  Log.verboseln(F("Inicializando MPU6050..."));
+  mpu.setAccelSensitivity(0);
+  mpu.setGyroSensitivity(0);
+  mpu.setThrottle(false);
+  mpu.setNormalize(false);  // desativa normalização automática
+
+  if (mpuFuncionando) {
+    Log.verboseln(F("Calibrando MPU..."));
+    mpu.calibrate(500);
+    Log.noticeln(F("MPU6050 inicializado e calibrado"));
+  } else {
+    Log.error(F("Falha na inicialização do MPU6050"));
+  }
+
   Log.verboseln(F("Inicializando servo..."));
   servoUltrassonico.attach(SERVO_PIN);
   servoUltrassonico.write(90);
 
   // Configuração de pinos com logs
   Log.verboseln(F("Configurando pinos de LED..."));
-  pinMode(LED1, OUTPUT);
-  pinMode(LED2, OUTPUT);
-  pinMode(LED3, OUTPUT);
-  pinMode(LED4, OUTPUT);
 
-  ledBinOutput(OP_INICIALIZANDO);
+  ledBinOutput(CALIBRANDO);
 
   // Calibração dos sensores QTR
   Log.verboseln(F("Iniciando calibração dos sensores QTR..."));
   qtr.setTypeRC();
-  qtr.setSensorPins((const uint8_t[]){43, 44, 45, 46, 47, 48, 49, 50}, 8);
+  qtr.setSensorPins((const uint8_t[]){43, 44, 45, 46, 47, 48, 49, 50, 51}, 8);
   for (int i = 0; i < 250; i++) {
     qtr.calibrate();
     if(i % 50 == 0) Log.verboseln("Calibração QTR: %d/250", i);
@@ -144,30 +176,10 @@ void setup() {
   }
   Log.noticeln(F("Calibração QTR concluída"));
 
-  // Inicialização I2C e MPU6050
-  Log.verboseln(F("Iniciando comunicação I2C..."));
-  Wire.begin();
+  ledBinOutput(OP_INICIALIZANDO);
   
-  Log.verboseln(F("Inicializando MPU6050..."));
-  mpu.begin();
-  mpu.setAccelSensitivity(0);
-  mpu.setGyroSensitivity(0);
-  mpu.setThrottle(false);
+  delay(500);
   
-  for (int i = 0; i < MAX_TENTATIVAS_MPU; i++) {
-    Log.verboseln("Tentativa %d de inicializar MPU...", i+1);
-    if (verificarMPU()) break;
-    delay(100);
-  }
-  
-  if (mpuFuncionando) {
-    Log.verboseln(F("Calibrando MPU..."));
-    mpu.calibrate(5);
-    Log.noticeln(F("MPU6050 inicializado e calibrado"));
-  } else {
-    Log.error(F("Falha na inicialização do MPU6050"));
-  }
-
   // Configuração dos LEDs dos sensores de cor
   Log.verboseln(F("Configurando LEDs dos sensores de cor..."));
   pinMode(LEDA, OUTPUT);
@@ -222,12 +234,14 @@ void loop() {
         break;
       }
 
-      if (media = 90) {
-        virar90(DIREITA);
+      if (media == 90) {
+        virar90(ESQUERDA);
+        break;
       }
 
-      if (media = 180) {
-        virar90(ESQUERDA);
+      if (media == 180) {
+        virar90(DIREITA);
+        break;
       }
       if (media == 69) {
         Log.noticeln(F("Bifurcação detectada! Mudando para RESOLVENDO_BIFURCACAO"));
@@ -235,21 +249,21 @@ void loop() {
         break;
       }
 
-      if (media < -1.5) {
+      if (media < -0.9) {
         Log.verboseln(F("Virando forte para ESQUERDA"));
-        virarForte(ESQUERDA);
-      }
-      else if (media > 1.5) {
-        Log.verboseln(F("Virando forte para DIREITA"));
         virarForte(DIREITA);
       }
-      else if (media < -0.7) {
-        Log.verboseln(F("Virando suave para ESQUERDA"));
-        virar(ESQUERDA);
+      else if (media > 0.9) {
+        Log.verboseln(F("Virando forte para DIREITA"));
+        virarForte(ESQUERDA);
       }
-      else if (media > 0.7) {
-        Log.verboseln(F("Virando suave para DIREITA"));
+      else if (media < -0.6) {
+        Log.verboseln(F("Virando suave para ESQUERDA"));
         virar(DIREITA);
+      }
+      else if (media > 0.6) {
+        Log.verboseln(F("Virando suave para DIREITA"));
+        virar(ESQUERDA);
       }
       else {
         Log.verboseln(F("Andando reto"));
@@ -336,6 +350,10 @@ float calcularPosicaoLinha() {
 
     if(i < 4) contEsquerda += valor;
     else      contDireita += valor;
+  }
+
+  if (somaPonderada == 0) {
+    return 0;
   }
 
   if(sensoresValidos == 0) {
@@ -462,25 +480,46 @@ void virar90(int direcao) {
 
 void virarComGiro(float angulo, int direcao) {
   pararMotores();
+  
   if (!verificarMPU()) {
-    virarForte(direcao); delay(angulo * 10);
+    Serial.println("MPU não detectada! Girando sem correção...");
+    virarForte(direcao);
+    delay(angulo * 10);  // valor empírico
     pararMotores();
     return;
   }
 
-  mpu.readGyro();
+  mpu.read();
   float yawInicial = mpu.getYaw();
-  float alvoYaw = fmod((yawInicial + (direcao == DIREITA ? angulo : -angulo) + 360), 360);
+
+  // Define o alvo com adição ou subtração simples
+  float alvoYaw = yawInicial + (direcao == DIREITA ? angulo : -angulo);
+
+  Serial.print("Yaw inicial: ");
+  Serial.println(yawInicial);
+  Serial.print("Alvo Yaw: ");
+  Serial.println(alvoYaw);
 
   while (true) {
-    mpu.readGyro();
-    float yawAtual = fmod(mpu.getYaw(), 360);
-    float delta = fmod((yawAtual - alvoYaw + 360), 360);
-    if (delta < 5 || delta > 355) break;
+    mpu.read();
+    float yawAtual = mpu.getYaw();
+
+    float restante = (direcao == DIREITA) ? (yawAtual - alvoYaw) : (alvoYaw - yawAtual);
+
+    Serial.print("Yaw atual: ");
+    Serial.println(yawAtual);
+    Serial.print("Restante: ");
+    Serial.println(restante);
+
+    // Verifica se já passou ou chegou no alvo
+    if (restante < 10) break;
+
     virar(direcao);
-    delay(10);
+    delay(10);  // controle simples de loop
   }
+
   pararMotores();
+  Serial.println("Giro finalizado.");
 }
 
 void controlarMotores(int esqFrente, int dirFrente, int vel = VEL_NORMAL) {
