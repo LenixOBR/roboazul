@@ -109,90 +109,96 @@ bool sensorDefeituoso[8] = {false};
 void setup() {
   Serial.begin(9600);
   Log.begin(LOG_LEVEL_VERBOSE, &Serial);
-  Log.notice(F("============================================="));
-  Log.notice(F("| Iniciando sistema do seguidor de linha    |"));
-  Log.notice(F("| Feito em 07/08/25                         |"));
-  Log.notice(F("| Log level: VERBOSE                        |"));
-  Log.notice(F("============================================="));
+  Log.noticeln(F("============================================="));
+  Log.noticeln(F("| Iniciando sistema do seguidor de linha    |"));
+  Log.noticeln(F("| Feito em 07/08/25                         |"));
+  Log.noticeln(F("| Log level: VERBOSE                        |"));
+  Log.noticeln(F("============================================="));
   
-  Log.verbose(F("Inicializando servo..."));
+  pinMode(LEDA, OUTPUT);
+  pinMode(LEDB, OUTPUT);
+  digitalWrite(LEDA, LOW);
+  digitalWrite(LEDB, LOW);
+
+  Log.verboseln(F("Inicializando servo..."));
   servoUltrassonico.attach(SERVO_PIN);
   servoUltrassonico.write(90);
 
   // Configuração de pinos com logs
-  Log.verbose(F("Configurando pinos de LED..."));
+  Log.verboseln(F("Configurando pinos de LED..."));
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
   pinMode(LED3, OUTPUT);
   pinMode(LED4, OUTPUT);
+
   ledBinOutput(OP_INICIALIZANDO);
 
   // Calibração dos sensores QTR
-  Log.verbose(F("Iniciando calibração dos sensores QTR..."));
+  Log.verboseln(F("Iniciando calibração dos sensores QTR..."));
   qtr.setTypeRC();
   qtr.setSensorPins((const uint8_t[]){43, 44, 45, 46, 47, 48, 49, 50}, 8);
   for (int i = 0; i < 250; i++) {
     qtr.calibrate();
-    if(i % 50 == 0) Log.verbose("Calibração QTR: %d/250", i);
+    if(i % 50 == 0) Log.verboseln("Calibração QTR: %d/250", i);
     delay(20);
   }
-  Log.notice(F("Calibração QTR concluída"));
+  Log.noticeln(F("Calibração QTR concluída"));
 
   // Inicialização I2C e MPU6050
-  Log.verbose(F("Iniciando comunicação I2C..."));
+  Log.verboseln(F("Iniciando comunicação I2C..."));
   Wire.begin();
   
-  Log.verbose(F("Inicializando MPU6050..."));
+  Log.verboseln(F("Inicializando MPU6050..."));
   mpu.begin();
   mpu.setAccelSensitivity(0);
   mpu.setGyroSensitivity(0);
   mpu.setThrottle(false);
   
   for (int i = 0; i < MAX_TENTATIVAS_MPU; i++) {
-    Log.verbose("Tentativa %d de inicializar MPU...", i+1);
+    Log.verboseln("Tentativa %d de inicializar MPU...", i+1);
     if (verificarMPU()) break;
     delay(100);
   }
   
   if (mpuFuncionando) {
-    Log.verbose(F("Calibrando MPU..."));
+    Log.verboseln(F("Calibrando MPU..."));
     mpu.calibrate(5);
-    Log.notice(F("MPU6050 inicializado e calibrado"));
+    Log.noticeln(F("MPU6050 inicializado e calibrado"));
   } else {
     Log.error(F("Falha na inicialização do MPU6050"));
   }
 
   // Configuração dos LEDs dos sensores de cor
-  Log.verbose(F("Configurando LEDs dos sensores de cor..."));
+  Log.verboseln(F("Configurando LEDs dos sensores de cor..."));
   pinMode(LEDA, OUTPUT);
   pinMode(LEDB, OUTPUT);
   desligarLEDs();
 
   // Inicialização dos sensores de cor
-  Log.verbose(F("Inicializando sensores de cor..."));
+  Log.verboseln(F("Inicializando sensores de cor..."));
   corSensores[0].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
   corSensores[1].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
   
   tcaSelect(0); 
   corSensores[0].inicializado = corSensores[0].tcs.begin();
-  Log.verbose("Sensor de cor 0 (esquerda) - %s", corSensores[0].inicializado ? "OK" : "FALHA");
+  Log.verboseln("Sensor de cor 0 (esquerda) - %s", corSensores[0].inicializado ? "OK" : "FALHA");
   
   tcaSelect(1); 
   corSensores[1].inicializado = corSensores[1].tcs.begin();
-  Log.verbose("Sensor de cor 1 (direita) - %s", corSensores[1].inicializado ? "OK" : "FALHA");
+  Log.verboseln("Sensor de cor 1 (direita) - %s", corSensores[1].inicializado ? "OK" : "FALHA");
 
   // Rotina inicial
-  Log.verbose(F("Vencendo resistência inicial dos motores..."));
+  Log.verboseln(F("Vencendo resistência inicial dos motores..."));
   vencerResistenciaInicial();
   
   estadoAtual = SEGUINDO_LINHA;
-  Log.notice(F("Sistema inicializado com sucesso"));
-  Log.notice(F("Estado inicial: SEGUINDO_LINHA"));
+  Log.noticeln(F("Sistema inicializado com sucesso"));
+  Log.noticeln(F("Estado inicial: SEGUINDO_LINHA"));
 }
 
 void loop() {
-  Log.verbose(F("--- Início do loop ---"));
-  Log.verbose("Estado atual: %d", estadoAtual);
+  Log.verboseln(F("--- Início do loop ---"));
+  Log.verboseln("Estado atual: %d", estadoAtual);
   
   switch(estadoAtual) {
     case INICIALIZANDO:
@@ -201,60 +207,67 @@ void loop() {
       break;
 
     case SEGUINDO_LINHA:
-      Log.verbose(F("Executando SEGUINDO_LINHA..."));
+      Log.verboseln(F("Executando SEGUINDO_LINHA..."));
       ledBinOutput(OP_SEGUINDO_LINHA);
       lerSensores();
       float media = calcularPosicaoLinha();
-      Log.verbose("Posição média da linha: %F", media);
+      Log.verboseln("Posição média da linha: %F", media);
 
       int distancia = sonar.ping_cm();
-      Log.verbose("Distância do obstáculo: %d cm", distancia);
+      Log.verboseln("Distância do obstáculo: %d cm", distancia);
       
       if (distancia < DISTANCIA_OBSTACULO && distancia != 0) {
-        Log.notice(F("Obstáculo detectado! Mudando para DESVIANDO_OBSTACULO"));
+        Log.noticeln(F("Obstáculo detectado! Mudando para DESVIANDO_OBSTACULO"));
         estadoAtual = DESVIANDO_OBSTACULO;
         break;
       }
 
+      if (media = 90) {
+        virar90(DIREITA);
+      }
+
+      if (media = 180) {
+        virar90(ESQUERDA);
+      }
       if (media == 69) {
-        Log.notice(F("Bifurcação detectada! Mudando para RESOLVENDO_BIFURCACAO"));
+        Log.noticeln(F("Bifurcação detectada! Mudando para RESOLVENDO_BIFURCACAO"));
         estadoAtual = RESOLVENDO_BIFURCACAO;
         break;
       }
 
       if (media < -1.5) {
-        Log.verbose(F("Virando forte para ESQUERDA"));
+        Log.verboseln(F("Virando forte para ESQUERDA"));
         virarForte(ESQUERDA);
       }
       else if (media > 1.5) {
-        Log.verbose(F("Virando forte para DIREITA"));
+        Log.verboseln(F("Virando forte para DIREITA"));
         virarForte(DIREITA);
       }
       else if (media < -0.7) {
-        Log.verbose(F("Virando suave para ESQUERDA"));
+        Log.verboseln(F("Virando suave para ESQUERDA"));
         virar(ESQUERDA);
       }
       else if (media > 0.7) {
-        Log.verbose(F("Virando suave para DIREITA"));
+        Log.verboseln(F("Virando suave para DIREITA"));
         virar(DIREITA);
       }
       else {
-        Log.verbose(F("Andando reto"));
+        Log.verboseln(F("Andando reto"));
         andarReto();
       }
       break;
 
     case RESOLVENDO_BIFURCACAO:
-        Log.notice(F("Resolvendo bifurcação..."));
+        Log.noticeln(F("Resolvendo bifurcação..."));
       resolverBifurcacao();
-      Log.notice(F("Bifurcação resolvida. Voltando para SEGUINDO_LINHA"));
+      Log.noticeln(F("Bifurcação resolvida. Voltando para SEGUINDO_LINHA"));
       estadoAtual = SEGUINDO_LINHA;
       break;
 
     case DESVIANDO_OBSTACULO:
-      Log.notice(F("Iniciando desvio de obstáculo..."));
+      Log.noticeln(F("Iniciando desvio de obstáculo..."));
       desviarObstaculo();
-      Log.notice(F("Obstáculo desviado. Voltando para SEGUINDO_LINHA"));
+      Log.noticeln(F("Obstáculo desviado. Voltando para SEGUINDO_LINHA"));
       estadoAtual = SEGUINDO_LINHA;
       break;
 
@@ -264,7 +277,7 @@ void loop() {
       break;
   }
   
-  Log.verbose(F("--- Fim do loop ---"));
+  Log.verboseln(F("--- Fim do loop ---"));
   delay(INTERVALO_LEITURA);
 }
 
@@ -273,7 +286,7 @@ void lerSensores() {
   qtr.readCalibrated(sensorValues); // Lê todos os 8 sensores do QTR-8RC
   
   for (int i = 0; i < 8; i++) {
-    Log.verbose("Sensor %d: %d", i, sensorValues[i]);
+    Log.verboseln("Sensor %d: %d", i, sensorValues[i]);
 
     // Verifica se sensor deu 0
     if (sensorValues[i] < LIMITE_ZERO) {
@@ -309,13 +322,20 @@ void lerSensores() {
 
 float calcularPosicaoLinha() {
   int total = 0;
-  int somaPonderada = 0;
+  float somaPonderada = 0;
   int sensoresValidos = 0;
 
+  int contEsquerda = 0;
+  int contDireita = 0;
+
   for(int i = 0; i < 8; i++) {
-    total += sensorDigital[i];
-    somaPonderada += sensorDigital[i] * (i - 3.5);
+    int valor = sensorDigital[i];
+    total += valor;
+    somaPonderada += valor * (i - 3.5);
     sensoresValidos++;
+
+    if(i < 4) contEsquerda += valor;
+    else      contDireita += valor;
   }
 
   if(sensoresValidos == 0) {
@@ -323,9 +343,16 @@ float calcularPosicaoLinha() {
     return 0;
   }
 
+  // Todos os sensores estão em preto (linha larga ou cruzamento)
   if(total == sensoresValidos) return 69;
+
+  // Verificação de 3 ou mais sensores pretos de um lado
+  if(contEsquerda >= 3) return 180; // virar 90° à esquerda
+  if(contDireita >= 3)  return 90;  // virar 90° à direita
+
   return somaPonderada / (3.5 * total);
 }
+
 
 void resolverBifurcacao() {
   ligarLEDs();
@@ -338,8 +365,8 @@ void resolverBifurcacao() {
   if (corA == PRETO && corB == PRETO) andarTras(), delay(500);
   else if (corA == PRETO) virarForte(DIREITA), delay(50);
   else if (corB == PRETO) virarForte(ESQUERDA), delay(50);
-  else if (corA == COLORIDO && corB != COLORIDO) andarReto(), delay(TEMPO_PRE90), virar90(ESQUERDA);
-  else if (corB == COLORIDO && corA != COLORIDO) andarReto(), delay(TEMPO_PRE90), virar90(DIREITA);
+  else if (corA == COLORIDO && corB != COLORIDO) virar90(ESQUERDA);
+  else if (corB == COLORIDO && corA != COLORIDO) virar90(DIREITA);
   else if (corA == COLORIDO && corB == COLORIDO) virar90(DIREITA), virar90(DIREITA);
   else andarReto(), delay(1350);
 }
