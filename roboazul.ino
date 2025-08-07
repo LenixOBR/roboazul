@@ -26,7 +26,7 @@ QTRSensors qtr;
 
 #define TEMPO_PRE90 1000
 #define TEMPO_ORBITA 2000
-#define VEL_NORMAL 88
+#define VEL_NORMAL 65
 #define VEL_RESISTENCIA 120
 #define VEL_CURVA 140
 #define VEL_CURVA_EXTREMA 220
@@ -36,9 +36,9 @@ QTRSensors qtr;
 #define DISTANCIA_MINIMA_VIRADA 10
 #define LIMIAR_LINHA 900
 
-#define LIMITE_ZERO 20
-#define MAX_CONTAGEM_FALHA 50
-#define MAX_SATURACAO_SEGUIDA 30
+#define MAX_SATURACAO_SEGUIDA 50     // Número de leituras saturadas seguidas para considerar defeituoso
+#define MAX_NORMAL_SEGUIDO 50        // Número de leituras normais seguidas para reviver
+#define LIMIAR_LINHA 500             // Ajuste conforme seu sensor
 
 #define SERVO_PIN 10
 #define ANGULO_FRENTE 90
@@ -46,6 +46,10 @@ QTRSensors qtr;
 #define ANGULO_DIREITA 0
 #define MAX_FALHAS_CONTINUAS 10
 #define MAX_BUFFER_CORES 10
+
+#define KP 100.0f
+#define KI 0.0f
+#define KD 10.0f
 
 // Enumerações com descrições detalhadas
 enum Estado {
@@ -103,10 +107,14 @@ CorSensor corSensores[2];
 Cores bufferCores[MAX_BUFFER_CORES];
 int indiceBuffer = 0;
 
-bool sensorDigital[8] = {};
-int contagemZeroQTR[8] = {0};
+bool sensorDigital[8] = {false};
 int contagemSaturacaoQTR[8] = {0};
+int contagemNormalQTR[8] = {0};
 bool sensorDefeituoso[8] = {false};
+int sensoresValidos = 8;  // ou inicialize conforme necessário
+
+float media = 0.0;
+float ultimaMedia = 0.0;
 
 void setup() {
   Serial.begin(9600);
@@ -135,6 +143,7 @@ void setup() {
   Log.verboseln(F("Iniciando comunicação I2C..."));
   Wire.begin();
 
+  Log.verboseln(F("Iniciando MPU..."));
   mpu.begin();
   for (int i = 0; i < MAX_TENTATIVAS_MPU; i++) {
     Log.verboseln("Tentativa %d de inicializar MPU...", i+1);
@@ -222,7 +231,7 @@ void loop() {
       Log.verboseln(F("Executando SEGUINDO_LINHA..."));
       ledBinOutput(OP_SEGUINDO_LINHA);
       lerSensores();
-      float media = calcularPosicaoLinha();
+      media = calcularPosicaoLinha();
       Log.verboseln("Posição média da linha: %F", media);
 
       int distancia = sonar.ping_cm();
@@ -234,48 +243,46 @@ void loop() {
         break;
       }
 
-      if (media == 90) {
-        virar90(ESQUERDA);
-        break;
-      }
-
-      if (media == 180) {
-        virar90(DIREITA);
-        break;
-      }
       if (media == 69) {
         Log.noticeln(F("Bifurcação detectada! Mudando para RESOLVENDO_BIFURCACAO"));
         estadoAtual = RESOLVENDO_BIFURCACAO;
         break;
       }
 
-      if (media < -0.9) {
-        Log.verboseln(F("Virando forte para ESQUERDA"));
-        virarForte(DIREITA);
-      }
-      else if (media > 0.9) {
-        Log.verboseln(F("Virando forte para DIREITA"));
-        virarForte(ESQUERDA);
-      }
-      else if (media < -0.6) {
-        Log.verboseln(F("Virando suave para ESQUERDA"));
-        virar(DIREITA);
-      }
-      else if (media > 0.6) {
-        Log.verboseln(F("Virando suave para DIREITA"));
-        virar(ESQUERDA);
-      }
-      else {
-        Log.verboseln(F("Andando reto"));
-        andarReto();
-      }
+      float correcaoPID = KP * media + KD * (ultimaMedia - media); 
+      ultimaMedia = media;
+
+      Log.verbose(" Correção PID: %c", correcaoPID);
+
+      int velocidade1 = VEL_NORMAL - correcaoPID;
+      int velocidade2 = VEL_NORMAL + correcaoPID;
+
+      controleFino(velocidade1, velocidade2);
+      
       break;
 
     case RESOLVENDO_BIFURCACAO:
-        Log.noticeln(F("Resolvendo bifurcação..."));
-      resolverBifurcacao();
-      Log.noticeln(F("Bifurcação resolvida. Voltando para SEGUINDO_LINHA"));
-      estadoAtual = SEGUINDO_LINHA;
+      Log.noticeln(F("Iniciando RESOLVENDO_BIFURCACAO..."));
+      ledBinOutput(OP_RESOLVENDO_BIFURCACAO);
+    
+      // Executa a resolução apenas uma vez
+      static bool bifurcacaoResolvida = false;
+      if (!bifurcacaoResolvida) {
+        resolverBifurcacao();
+        bifurcacaoResolvida = true;
+        Log.noticeln(F("Bifurcação resolvida. Pronto para voltar a seguir linha"));
+      }
+      
+      // Volta para SEGUINDO_LINHA apenas quando confirmado
+      lerSensores();
+
+      media = calcularPosicaoLinha();
+
+      if (media != 69) { // Só volta se não estiver mais na bifurcação
+        estadoAtual = SEGUINDO_LINHA;
+        bifurcacaoResolvida = false;
+        Log.noticeln(F("Voltando para SEGUINDO_LINHA"));
+      }
       break;
 
     case DESVIANDO_OBSTACULO:
@@ -284,11 +291,12 @@ void loop() {
       Log.noticeln(F("Obstáculo desviado. Voltando para SEGUINDO_LINHA"));
       estadoAtual = SEGUINDO_LINHA;
       break;
-
     case PARADO:
       Log.warning(F("ROBÔ PARADO!"));
       pararMotores();
       break;
+    default:
+      Log.warningln("PORQUE RAIOS ESTÁ NO DEFAULT? ISSO NÃO É POSSIVEL! O ESTADO ATUAL É: %d", estadoAtual);
   }
   
   Log.verboseln(F("--- Fim do loop ---"));
@@ -302,29 +310,30 @@ void lerSensores() {
   for (int i = 0; i < 8; i++) {
     Log.verboseln("Sensor %d: %d", i, sensorValues[i]);
 
-    // Verifica se sensor deu 0
-    if (sensorValues[i] < LIMITE_ZERO) {
-      contagemZeroQTR[i]++;
-    } else {
-      contagemZeroQTR[i] = 0;
-    }
-
-    // Verifica se deu 1000 (saturado)
+    // Verifica se está saturado
     if (sensorValues[i] >= 1000) {
       contagemSaturacaoQTR[i]++;
+      contagemNormalQTR[i] = 0;  // Zera contador de leituras normais
     } else {
       contagemSaturacaoQTR[i] = 0;
+      contagemNormalQTR[i]++;    // Conta quantas vezes o sensor está normal
     }
 
-    // Marca sensor como defeituoso se ultrapassar limites
-    if (contagemZeroQTR[i] >= MAX_CONTAGEM_FALHA || contagemSaturacaoQTR[i] >= MAX_SATURACAO_SEGUIDA) {
-      if (!sensorDefeituoso[i]) {
-        sensorDefeituoso[i] = true;
-        Log.warning("Sensor QTR %d marcado como defeituoso!", i);
-      }
+    // Marca sensor como defeituoso se estiver saturando por muito tempo
+    if (contagemSaturacaoQTR[i] >= MAX_SATURACAO_SEGUIDA && !sensorDefeituoso[i]) {
+      sensorDefeituoso[i] = true;
+      sensoresValidos--;
+      Log.warning("Sensor QTR %d marcado como defeituoso!", i);
     }
 
-    // Ignora sensores defeituosos
+    // Revive sensor se voltou ao normal por tempo suficiente
+    if (sensorDefeituoso[i] && contagemNormalQTR[i] >= MAX_NORMAL_SEGUIDO) {
+      sensorDefeituoso[i] = false;
+      sensoresValidos++;
+      Log.notice("Sensor QTR %d voltou ao funcionamento normal.", i);
+    }
+
+    // Ignora sensores defeituosos na leitura digital
     if (sensorDefeituoso[i]) {
       sensorDigital[i] = 0;
       continue;
@@ -337,23 +346,14 @@ void lerSensores() {
 float calcularPosicaoLinha() {
   int total = 0;
   float somaPonderada = 0;
-  int sensoresValidos = 0;
-
-  int contEsquerda = 0;
-  int contDireita = 0;
 
   for(int i = 0; i < 8; i++) {
     int valor = sensorDigital[i];
     total += valor;
-    somaPonderada += valor * (i - 3.5);
-    sensoresValidos++;
 
-    if(i < 4) contEsquerda += valor;
-    else      contDireita += valor;
-  }
-
-  if (somaPonderada == 0) {
-    return 0;
+    // Peso mais forte: exponencial centrada em 3.5
+    float peso = pow((i - 3.5), 3);  // Cubo enfatiza sensores das extremidades
+    somaPonderada += valor * peso;
   }
 
   if(sensoresValidos == 0) {
@@ -361,32 +361,57 @@ float calcularPosicaoLinha() {
     return 0;
   }
 
-  // Todos os sensores estão em preto (linha larga ou cruzamento)
-  if(total == sensoresValidos) return 69;
+  // Linha larga ou cruzamento
+  if(total >= sensoresValidos - 1) return 69;
 
-  // Verificação de 3 ou mais sensores pretos de um lado
-  if(contEsquerda >= 3) return 180; // virar 90° à esquerda
-  if(contDireita >= 3)  return 90;  // virar 90° à direita
+  // Fator de amplificação baseado na quantidade de sensores ativados
+  float fatorMultiplicador = 1 + (sensoresValidos - 1) * 0.2;
 
-  return somaPonderada / (3.5 * total);
+  // Normaliza e aplica fator
+  return (somaPonderada / (pow(3.5, 3) * total)) * fatorMultiplicador;
 }
 
 
 void resolverBifurcacao() {
+  Log.verboseln("Resolverbifurcacao()");
   ligarLEDs();
   Cores corA = detectarCor(0);
   Cores corB = detectarCor(1);
   desligarLEDs();
 
+  Log.verboseln("corA: %d | corB: %d", corA, corB);
+
+  // Checa erro antes de seguir
+  if (corA == ERRO || corB == ERRO) {
+    Log.errorln(F("Falha na detecção de cor! corA: %d | corB: %d"), corA, corB);
+    pararMotores();
+    delay(500);  // Ou lidar de forma mais inteligente
+    return;
+  }
+
   vencerResistenciaInicial();
 
-  if (corA == PRETO && corB == PRETO) andarTras(), delay(500);
-  else if (corA == PRETO) virarForte(DIREITA), delay(50);
-  else if (corB == PRETO) virarForte(ESQUERDA), delay(50);
-  else if (corA == COLORIDO && corB != COLORIDO) virar90(ESQUERDA);
-  else if (corB == COLORIDO && corA != COLORIDO) virar90(DIREITA);
-  else if (corA == COLORIDO && corB == COLORIDO) virar90(DIREITA), virar90(DIREITA);
-  else andarReto(), delay(1350);
+  if (corA == PRETO && corB == PRETO) {
+    andarTras();
+    delay(500);
+  } else if (corA == PRETO) {
+    virarForte(DIREITA);
+    delay(50);
+  } else if (corB == PRETO) {
+    virarForte(ESQUERDA);
+    delay(50);
+  } else if (corA == COLORIDO && corB != COLORIDO) {
+    virar90(ESQUERDA);
+  } else if (corB == COLORIDO && corA != COLORIDO) {
+    virar90(DIREITA);
+  } else if (corA == COLORIDO && corB == COLORIDO) {
+    virar90(DIREITA);
+    virar90(DIREITA);
+  } else {
+    Log.warningln(F("Condição de bifurcação inesperada. Executando andarReto."));
+    andarReto();
+    delay(1350);
+  }
 }
 
 void desviarObstaculo() {
@@ -522,15 +547,29 @@ void virarComGiro(float angulo, int direcao) {
   Serial.println("Giro finalizado.");
 }
 
-void controlarMotores(int esqFrente, int dirFrente, int vel = VEL_NORMAL) {
+void controlarMotores(int esq, int dir, int vel = VEL_NORMAL) {
   motorFrenteEsquerdo.setSpeed(vel);
   motorFrenteDireito.setSpeed(vel);
   motorTrasEsquerdo.setSpeed(vel);
   motorTrasDireito.setSpeed(vel);
-  motorFrenteEsquerdo.run(esqFrente ? FORWARD : BACKWARD);
-  motorTrasEsquerdo.run(esqFrente ? FORWARD : BACKWARD);
-  motorFrenteDireito.run(dirFrente ? FORWARD : BACKWARD);
-  motorTrasDireito.run(dirFrente ? FORWARD : BACKWARD);
+  motorFrenteEsquerdo.run(esq ? FORWARD : BACKWARD);
+  motorTrasEsquerdo.run(esq ? FORWARD : BACKWARD);
+  motorFrenteDireito.run(dir ? FORWARD : BACKWARD);
+  motorTrasDireito.run(dir ? FORWARD : BACKWARD);
+}
+
+void controleFino(int esq, int dir) {
+  int absEsq = abs(esq);
+  int absDir = abs(dir);
+  motorFrenteEsquerdo.setSpeed(absEsq);
+  motorFrenteDireito.setSpeed(absEsq);
+  motorTrasEsquerdo.setSpeed(absDir);
+  motorTrasDireito.setSpeed(absDir);
+  
+  motorFrenteEsquerdo.run((esq > 0) ? FORWARD : BACKWARD);
+  motorTrasEsquerdo.run((esq > 0) ? FORWARD : BACKWARD);
+  motorFrenteDireito.run((dir > 0) ? FORWARD : BACKWARD);
+  motorTrasDireito.run((dir > 0) ? FORWARD : BACKWARD);
 }
 
 void pararMotores() { controlarMotores(1, 1, 0); }
