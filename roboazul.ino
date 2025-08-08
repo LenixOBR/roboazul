@@ -26,7 +26,7 @@ QTRSensors qtr;
 
 #define TEMPO_PRE90 1000
 #define TEMPO_ORBITA 2000
-#define VEL_NORMAL 65
+#define VEL_NORMAL 85
 #define VEL_RESISTENCIA 120
 #define VEL_CURVA 140
 #define VEL_CURVA_EXTREMA 220
@@ -38,7 +38,6 @@ QTRSensors qtr;
 
 #define MAX_SATURACAO_SEGUIDA 50     // Número de leituras saturadas seguidas para considerar defeituoso
 #define MAX_NORMAL_SEGUIDO 50        // Número de leituras normais seguidas para reviver
-#define LIMIAR_LINHA 500             // Ajuste conforme seu sensor
 
 #define SERVO_PIN 10
 #define ANGULO_FRENTE 90
@@ -92,7 +91,7 @@ GY521 mpu(0x68);
 bool mpuFuncionando = true;
 const int MAX_TENTATIVAS_MPU = 3;
 bool tcsFuncionando[2] = {false, false};
-Estado estadoAtual = Estado::INICIALIZANDO;
+volatile Estado estadoAtual = Estado::INICIALIZANDO;
 unsigned long ultimaAtualizacaoLED = 0;
 const unsigned long INTERVALO_LED_MS = 200;
 int ultimoCodigoMostrado = -1;
@@ -119,6 +118,12 @@ float ultimaMedia = 0.0;
 void setup() {
   Serial.begin(9600);
 
+  pinMode(LED1, OUTPUT);
+  pinMode(LED2, OUTPUT);
+  pinMode(LED3, OUTPUT);
+  pinMode(LED4, OUTPUT);
+  ledCountTest();
+
   if (Serial) {
     Log.begin(LOG_LEVEL_VERBOSE, &Serial);
   }
@@ -133,11 +138,6 @@ void setup() {
   pinMode(LEDB, OUTPUT);
   digitalWrite(LEDA, LOW);
   digitalWrite(LEDB, LOW);
-
-  pinMode(LED1, OUTPUT);
-  pinMode(LED2, OUTPUT);
-  pinMode(LED3, OUTPUT);
-  pinMode(LED4, OUTPUT);
 
   // Inicialização I2C e MPU6050
   Log.verboseln(F("Iniciando comunicação I2C..."));
@@ -212,7 +212,7 @@ void setup() {
   Log.verboseln(F("Vencendo resistência inicial dos motores..."));
   vencerResistenciaInicial();
   
-  estadoAtual = Estado::SEGUINDO_LINHA;
+  estadoAtual = Estado::INICIALIZANDO;
   Log.noticeln(F("Sistema inicializado com sucesso"));
   Log.noticeln(F("Estado inicial: SEGUINDO_LINHA"));
 }
@@ -222,12 +222,12 @@ void loop() {
   Log.verboseln("Estado atual: %d", static_cast<int>(estadoAtual));
   
   switch(estadoAtual) {
-    case Estado::INICIALIZANDO:
+    case Estado::INICIALIZANDO:{
       Log.warning(F("Estado INICIALIZANDO não deveria ser alcançado no loop"));
       estadoAtual = Estado::SEGUINDO_LINHA;
-      break;
-
-    case Estado::SEGUINDO_LINHA:
+      return;
+    }
+    case Estado::SEGUINDO_LINHA: {
       Log.verboseln(F("Executando SEGUINDO_LINHA..."));
       ledBinOutput(OP_SEGUINDO_LINHA);
       lerSensores();
@@ -240,13 +240,13 @@ void loop() {
       if (distancia < DISTANCIA_OBSTACULO && distancia != 0) {
         Log.noticeln(F("Obstáculo detectado! Mudando para DESVIANDO_OBSTACULO"));
         estadoAtual = Estado::DESVIANDO_OBSTACULO;
-        break;
+        return;
       }
 
       if (media == 69) {
         Log.noticeln(F("Bifurcação detectada! Mudando para RESOLVENDO_BIFURCACAO"));
         estadoAtual = Estado::RESOLVENDO_BIFURCACAO;
-        break;
+        return;
       }
 
       float correcaoPID = KP * media + KD * (ultimaMedia - media); 
@@ -260,8 +260,8 @@ void loop() {
       controleFino(velocidade1, velocidade2);
       
       break;
-
-    case Estado::RESOLVENDO_BIFURCACAO:
+    }
+    case Estado::RESOLVENDO_BIFURCACAO: {
       Log.noticeln(F("Iniciando RESOLVENDO_BIFURCACAO..."));
       ledBinOutput(OP_RESOLVENDO_BIFURCACAO);
     
@@ -283,20 +283,23 @@ void loop() {
         bifurcacaoResolvida = false;
         Log.noticeln(F("Voltando para SEGUINDO_LINHA"));
       }
-      break;
-
-    case Estado::DESVIANDO_OBSTACULO:
+      return;
+    }
+    case Estado::DESVIANDO_OBSTACULO: {
       Log.noticeln(F("Iniciando desvio de obstáculo..."));
       desviarObstaculo();
       Log.noticeln(F("Obstáculo desviado. Voltando para SEGUINDO_LINHA"));
       estadoAtual = Estado::SEGUINDO_LINHA;
       break;
-    case Estado::PARADO:
+    }
+    case Estado::PARADO:{
       Log.warning(F("ROBÔ PARADO!"));
       pararMotores();
       break;
-    default:
+    }
+    default:{
       Log.warningln("PORQUE RAIOS ESTÁ NO DEFAULT? ISSO NÃO É POSSIVEL! O ESTADO ATUAL É: %d", estadoAtual);
+    }
   }
   
   Log.verboseln(F("--- Fim do loop ---"));
@@ -308,8 +311,6 @@ void lerSensores() {
   qtr.readCalibrated(sensorValues); // Lê todos os 8 sensores do QTR-8RC
   
   for (int i = 0; i < 8; i++) {
-    Log.verboseln("Sensor %d: %d", i, sensorValues[i]);
-
     // Verifica se está saturado
     if (sensorValues[i] >= 1000) {
       contagemSaturacaoQTR[i]++;
@@ -323,7 +324,7 @@ void lerSensores() {
     if (contagemSaturacaoQTR[i] >= MAX_SATURACAO_SEGUIDA && !sensorDefeituoso[i]) {
       sensorDefeituoso[i] = true;
       sensoresValidos--;
-      Log.warning("Sensor QTR %d marcado como defeituoso!", i);
+      Log.warning("Sensor %d marcado como defeituoso!", i);
     }
 
     // Revive sensor se voltou ao normal por tempo suficiente
@@ -336,10 +337,12 @@ void lerSensores() {
     // Ignora sensores defeituosos na leitura digital
     if (sensorDefeituoso[i]) {
       sensorDigital[i] = 0;
+      Log.verboseln("Sensor %d: Defeituoso", i);
       continue;
     }
 
     sensorDigital[i] = sensorValues[i] > LIMIAR_LINHA ? 1 : 0;
+    Log.verboseln("Sensor %d: %d -- Linha: %t -- ContNormal: %d -- ContSaturacao: %d", i, sensorValues[i], sensorDigital[i], contagemNormalQTR[i], contagemSaturacaoQTR[i]);
   }
 }
 
@@ -562,13 +565,13 @@ void controleFino(int esq, int dir) {
   int absEsq = abs(esq);
   int absDir = abs(dir);
   motorFrenteEsquerdo.setSpeed(absEsq);
-  motorFrenteDireito.setSpeed(absEsq);
-  motorTrasEsquerdo.setSpeed(absDir);
+  motorFrenteDireito.setSpeed(absDir);
+  motorTrasEsquerdo.setSpeed(absEsq);
   motorTrasDireito.setSpeed(absDir);
   
   motorFrenteEsquerdo.run((esq > 0) ? FORWARD : BACKWARD);
-  motorTrasEsquerdo.run((esq > 0) ? FORWARD : BACKWARD);
   motorFrenteDireito.run((dir > 0) ? FORWARD : BACKWARD);
+  motorTrasEsquerdo.run((esq > 0) ? FORWARD : BACKWARD);
   motorTrasDireito.run((dir > 0) ? FORWARD : BACKWARD);
 }
 
@@ -601,6 +604,17 @@ void tcaSelect(uint8_t channel) {
   Wire.beginTransmission(TCAADDR);
   Wire.write(1 << channel);
   Wire.endTransmission();
+}
+
+void ledCountTest() {
+  digitalWrite(LED1, HIGH);
+  delay(175);
+  digitalWrite(LED2, HIGH);
+  delay(175);
+  digitalWrite(LED3, HIGH);
+  delay(175);
+  digitalWrite(LED4, HIGH);
+  delay(175);
 }
 
 void ledBinOutput(int code) {
