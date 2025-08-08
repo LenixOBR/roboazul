@@ -26,7 +26,7 @@ QTRSensors qtr;
 
 #define TEMPO_PRE90 1000
 #define TEMPO_ORBITA 2000
-#define VEL_NORMAL 85
+#define VEL_NORMAL 150
 #define VEL_RESISTENCIA 120
 #define VEL_CURVA 140
 #define VEL_CURVA_EXTREMA 220
@@ -133,7 +133,11 @@ void setup() {
   Log.noticeln(F("| Feito em 07/08/25                         |"));
   Log.noticeln(F("| Log level: VERBOSE                        |"));
   Log.noticeln(F("============================================="));
-  
+
+  Log.verboseln(F("Inicializando servo..."));
+  servoUltrassonico.attach(SERVO_PIN);
+  servoUltrassonico.write(90);
+
   pinMode(LEDA, OUTPUT);
   pinMode(LEDB, OUTPUT);
   digitalWrite(LEDA, LOW);
@@ -165,10 +169,6 @@ void setup() {
     Log.error(F("Falha na inicialização do MPU6050"));
   }
 
-  Log.verboseln(F("Inicializando servo..."));
-  servoUltrassonico.attach(SERVO_PIN);
-  servoUltrassonico.write(90);
-
   // Configuração de pinos com logs
   Log.verboseln(F("Configurando pinos de LED..."));
 
@@ -178,11 +178,27 @@ void setup() {
   Log.verboseln(F("Iniciando calibração dos sensores QTR..."));
   qtr.setTypeRC();
   qtr.setSensorPins((const uint8_t[]){43, 44, 45, 46, 47, 48, 49, 50, 51}, 8);
-  for (int i = 0; i < 250; i++) {
+  for (int i = 0; i < 1000; i++) {
     qtr.calibrate();
-    if(i % 50 == 0) Log.verboseln("Calibração QTR: %d/250", i);
+
+      // Movimento para calibrar sobre a linha
+    if (i < 500) {
+          // Primeira metade: vai para frente
+      controleFino(VEL_NORMAL, -VEL_NORMAL); // gira para um lado
+    } else {
+      // Segunda metade: gira para o outro lado
+      controleFino(-VEL_NORMAL, VEL_NORMAL);
+    }
+
+    if (i % 50 == 0) {
+      Log.verboseln("Calibração QTR: %d/1000", i);
+    }
+
     delay(20);
   }
+
+  pararMotores();
+
   Log.noticeln(F("Calibração QTR concluída"));
 
   ledBinOutput(OP_INICIALIZANDO);
@@ -256,6 +272,8 @@ void loop() {
 
       int velocidade1 = VEL_NORMAL - correcaoPID;
       int velocidade2 = VEL_NORMAL + correcaoPID;
+
+      Log.verboseln("ESQ: %d -- DIR: %d", velocidade1, velocidade2);
 
       controleFino(velocidade1, velocidade2);
       
@@ -608,13 +626,13 @@ void tcaSelect(uint8_t channel) {
 
 void ledCountTest() {
   digitalWrite(LED1, HIGH);
-  delay(175);
+  delay(125);
   digitalWrite(LED2, HIGH);
-  delay(175);
+  delay(125);
   digitalWrite(LED3, HIGH);
-  delay(175);
+  delay(125);
   digitalWrite(LED4, HIGH);
-  delay(175);
+  delay(12);
 }
 
 void ledBinOutput(int code) {
