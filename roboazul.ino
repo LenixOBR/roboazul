@@ -52,7 +52,7 @@ QTRSensors qtr;
 #define KD 10.0f
 
 // Enumerações com descrições detalhadas
-enum Estado {
+enum class Estado {
   SEGUINDO_LINHA,       // Estado normal de seguimento de linha
   RESOLVENDO_BIFURCACAO, // Encontrou uma bifurcação na pista
   DESVIANDO_OBSTACULO,   // Detectou obstáculo e está desviando
@@ -92,7 +92,7 @@ GY521 mpu(0x68);
 bool mpuFuncionando = true;
 const int MAX_TENTATIVAS_MPU = 3;
 bool tcsFuncionando[2] = {false, false};
-Estado estadoAtual = INICIALIZANDO;
+Estado estadoAtual = Estado::INICIALIZANDO;
 unsigned long ultimaAtualizacaoLED = 0;
 const unsigned long INTERVALO_LED_MS = 200;
 int ultimoCodigoMostrado = -1;
@@ -212,22 +212,22 @@ void setup() {
   Log.verboseln(F("Vencendo resistência inicial dos motores..."));
   vencerResistenciaInicial();
   
-  estadoAtual = SEGUINDO_LINHA;
+  estadoAtual = Estado::SEGUINDO_LINHA;
   Log.noticeln(F("Sistema inicializado com sucesso"));
   Log.noticeln(F("Estado inicial: SEGUINDO_LINHA"));
 }
 
 void loop() {
   Log.verboseln(F("--- Início do loop ---"));
-  Log.verboseln("Estado atual: %d", estadoAtual);
+  Log.verboseln("Estado atual: %d", static_cast<int>(estadoAtual));
   
   switch(estadoAtual) {
-    case INICIALIZANDO:
+    case Estado::INICIALIZANDO:
       Log.warning(F("Estado INICIALIZANDO não deveria ser alcançado no loop"));
-      estadoAtual = SEGUINDO_LINHA;
+      estadoAtual = Estado::SEGUINDO_LINHA;
       break;
 
-    case SEGUINDO_LINHA:
+    case Estado::SEGUINDO_LINHA:
       Log.verboseln(F("Executando SEGUINDO_LINHA..."));
       ledBinOutput(OP_SEGUINDO_LINHA);
       lerSensores();
@@ -239,13 +239,13 @@ void loop() {
       
       if (distancia < DISTANCIA_OBSTACULO && distancia != 0) {
         Log.noticeln(F("Obstáculo detectado! Mudando para DESVIANDO_OBSTACULO"));
-        estadoAtual = DESVIANDO_OBSTACULO;
+        estadoAtual = Estado::DESVIANDO_OBSTACULO;
         break;
       }
 
       if (media == 69) {
         Log.noticeln(F("Bifurcação detectada! Mudando para RESOLVENDO_BIFURCACAO"));
-        estadoAtual = RESOLVENDO_BIFURCACAO;
+        estadoAtual = Estado::RESOLVENDO_BIFURCACAO;
         break;
       }
 
@@ -261,7 +261,7 @@ void loop() {
       
       break;
 
-    case RESOLVENDO_BIFURCACAO:
+    case Estado::RESOLVENDO_BIFURCACAO:
       Log.noticeln(F("Iniciando RESOLVENDO_BIFURCACAO..."));
       ledBinOutput(OP_RESOLVENDO_BIFURCACAO);
     
@@ -279,19 +279,19 @@ void loop() {
       media = calcularPosicaoLinha();
 
       if (media != 69) { // Só volta se não estiver mais na bifurcação
-        estadoAtual = SEGUINDO_LINHA;
+        estadoAtual = Estado::SEGUINDO_LINHA;
         bifurcacaoResolvida = false;
         Log.noticeln(F("Voltando para SEGUINDO_LINHA"));
       }
       break;
 
-    case DESVIANDO_OBSTACULO:
+    case Estado::DESVIANDO_OBSTACULO:
       Log.noticeln(F("Iniciando desvio de obstáculo..."));
       desviarObstaculo();
       Log.noticeln(F("Obstáculo desviado. Voltando para SEGUINDO_LINHA"));
-      estadoAtual = SEGUINDO_LINHA;
+      estadoAtual = Estado::SEGUINDO_LINHA;
       break;
-    case PARADO:
+    case Estado::PARADO:
       Log.warning(F("ROBÔ PARADO!"));
       pararMotores();
       break;
