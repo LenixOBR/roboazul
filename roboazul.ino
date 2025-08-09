@@ -7,6 +7,7 @@
 #include <ArduinoLog.h>
 #include <QTRSensors.h>
 #include <math.h>
+#include <EEPROM.h>
 
 QTRSensors qtr;
 
@@ -115,6 +116,69 @@ int sensoresValidos = 8;  // ou inicialize conforme necessário
 float media = 0.0;
 float ultimaMedia = 0.0;
 
+#define QTR_EEPROM_ADDR 0
+#define QTR_EEPROM_MAGIC 0xA5A5
+#define QTR_EEPROM_SIZE (2 + 2 + 8*2*2 + 2) // magic + sensorCount + min/max for 8 sensors (on/off) + CRC
+
+// CRC-16-CCITT
+uint16_t crc16(const uint8_t* data, size_t len) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < len; i++) {
+    crc ^= (uint16_t)data[i] << 8;
+    for (uint8_t j = 0; j < 8; j++) {
+      if (crc & 0x8000) crc = (crc << 1) ^ 0x1021;
+      else crc <<= 1;
+    }
+  }
+  return crc;
+}
+
+void saveQTRCalibrationToEEPROM() {
+  int addr = QTR_EEPROM_ADDR;
+  EEPROM.put(addr, QTR_EEPROM_MAGIC); addr += 2;
+  EEPROM.put(addr, qtr.getType() == QTRType::RC ? 8 : 0); addr += 2;
+  for (int i = 0; i < 8; i++) {
+    EEPROM.put(addr, qtr.calibrationOn.minimum[i]); addr += 2;
+    EEPROM.put(addr, qtr.calibrationOn.maximum[i]); addr += 2;
+  }
+  for (int i = 0; i < 8; i++) {
+    EEPROM.put(addr, qtr.calibrationOff.minimum ? qtr.calibrationOff.minimum[i] : 0); addr += 2;
+    EEPROM.put(addr, qtr.calibrationOff.maximum ? qtr.calibrationOff.maximum[i] : 0); addr += 2;
+  }
+  // CRC
+  uint8_t buf[QTR_EEPROM_SIZE-2];
+  for (int i = 0; i < QTR_EEPROM_SIZE-2; i++) buf[i] = EEPROM.read(QTR_EEPROM_ADDR + i);
+  uint16_t crc = crc16(buf, QTR_EEPROM_SIZE-2);
+  EEPROM.put(addr, crc);
+}
+
+bool loadQTRCalibrationFromEEPROM() {
+  qtr.calibrate(); // este é uma calibração temporária para garantir que os arrays estejam alocados, ou seja, só cria os arrays
+  int addr = QTR_EEPROM_ADDR;
+  uint16_t magic; EEPROM.get(addr, magic); addr += 2;
+  if (magic != QTR_EEPROM_MAGIC) return false;
+  uint16_t sensorCount; EEPROM.get(addr, sensorCount); addr += 2;
+  if (sensorCount != 8) return false;
+  uint16_t minOn[8], maxOn[8], minOff[8], maxOff[8];
+  for (int i = 0; i < 8; i++) { EEPROM.get(addr, minOn[i]); addr += 2; EEPROM.get(addr, maxOn[i]); addr += 2; }
+  for (int i = 0; i < 8; i++) { EEPROM.get(addr, minOff[i]); addr += 2; EEPROM.get(addr, maxOff[i]); addr += 2; }
+  uint16_t crcStored; EEPROM.get(addr, crcStored);
+  uint8_t buf[QTR_EEPROM_SIZE-2];
+  for (int i = 0; i < QTR_EEPROM_SIZE-2; i++) buf[i] = EEPROM.read(QTR_EEPROM_ADDR + i);
+  uint16_t crcCalc = crc16(buf, QTR_EEPROM_SIZE-2);
+  if (crcStored != crcCalc) return false;
+  // Copy to QTR
+  for (int i = 0; i < 8; i++) {
+    qtr.calibrationOn.minimum[i] = minOn[i];
+    qtr.calibrationOn.maximum[i] = maxOn[i];
+    if (qtr.calibrationOff.minimum) qtr.calibrationOff.minimum[i] = minOff[i];
+    if (qtr.calibrationOff.maximum) qtr.calibrationOff.maximum[i] = maxOff[i];
+  }
+  qtr.calibrationOn.initialized = true;
+  qtr.calibrationOff.initialized = true;
+  return true;
+}
+
 void setup() {
   Serial.begin(9600);
 
@@ -178,28 +242,25 @@ void setup() {
   Log.verboseln(F("Iniciando calibração dos sensores QTR..."));
   qtr.setTypeRC();
   qtr.setSensorPins((const uint8_t[]){43, 44, 45, 46, 47, 48, 49, 50, 51}, 8);
-  for (int i = 0; i < 1000; i++) {
-    qtr.calibrate();
 
-      // Movimento para calibrar sobre a linha
-    if (i < 500) {
-          // Primeira metade: vai para frente
-      controleFino(VEL_NORMAL, -VEL_NORMAL); // gira para um lado
-    } else {
-      // Segunda metade: gira para o outro lado
-      controleFino(-VEL_NORMAL, VEL_NORMAL);
-    }
-
-    if (i % 50 == 0) {
-      Log.verboseln("Calibração QTR: %d/1000", i);
-    }
-
-    delay(20);
+  bool doCalib = digitalRead(CALIB_FLAG) == HIGH;
+  bool loaded = false;
+  if (!doCalib) {
+    loaded = loadQTRCalibrationFromEEPROM();
+    if (loaded) Log.noticeln(F("QTR calibração carregada da EEPROM."));
+    else Log.warningln(F("EEPROM inválida, calibrando QTR."));
   }
-
-  pararMotores();
-
-  Log.noticeln(F("Calibração QTR concluída"));
+  if (doCalib || !loaded) {
+    for (int i = 0; i < 1000; i++) {
+      qtr.calibrate();
+      if (i % 50 == 0) Log.verboseln("Calibração QTR: %d/1000", i);
+      delay(20);
+    }
+    pararMotores();
+    Log.noticeln(F("Calibração QTR concluída"));
+    saveQTRCalibrationToEEPROM();
+    Log.noticeln(F("Calibração QTR salva na EEPROM."));
+  }
 
   ledBinOutput(OP_INICIALIZANDO);
   
