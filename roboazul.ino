@@ -49,7 +49,7 @@ QTRSensors qtr;
 
 #define KP 90.0f
 #define KI 0.0f
-#define KD 2.0f
+#define KD 6.0f
 
 // Enumerações com descrições detalhadas
 enum class Estado {
@@ -304,12 +304,10 @@ void setup() {
 }
 
 void loop() {
-  Log.verboseln(F("--- Início do loop ---"));
   Log.verboseln("Estado atual: %d", static_cast<int>(estadoAtual));
   
   switch(estadoAtual) {
     case Estado::SEGUINDO_LINHA: {
-      Log.verboseln(F("Executando SEGUINDO_LINHA..."));
       ledBinOutput(OP_SEGUINDO_LINHA);
 
       lerSensores();
@@ -326,11 +324,20 @@ void loop() {
         return;
       }
 
-      float correcaoPID = KP * media + KD * (ultimaMedia - media); 
-      ultimaMedia = media;
+      // PID variables
+      static float integral = 0.0;
+      static float lastError = 0.0;
+      float setpoint = 0.0;
+      float error = setpoint - media;
+      integral += error;
+      float derivative = error - lastError;
+      lastError = error;
 
-      int velocidade1 = VEL_NORMAL + correcaoPID;
-      int velocidade2 = VEL_NORMAL - correcaoPID;
+      int correcaoPID = KP * error + KI * integral + KD * derivative;
+      ultimaMedia = media;
+      
+      int velocidade1 = VEL_NORMAL - correcaoPID;
+      int velocidade2 = VEL_NORMAL + correcaoPID;
 
       controleFino(velocidade1, velocidade2);
       // Remove delay para máxima velocidade
@@ -381,9 +388,6 @@ void loop() {
       Log.warningln("PORQUE RAIOS ESTÁ NO DEFAULT? ISSO NÃO É POSSIVEL! O ESTADO ATUAL É: %d", estadoAtual);
     }
   }
-  
-  Log.verboseln(F("--- Fim do loop ---"));
-  delay(INTERVALO_LEITURA);
 }
 
 void lerSensores() {
@@ -393,7 +397,7 @@ void lerSensores() {
 float calcularPosicaoLinha() {
   int somaPonderada = 0;
   int total = 0;
-  const int posicoes[8] = {-8000, -4000, -2000, -1000, 1000, 2000, 4000, 8000};
+  const int posicoes[8] = {-12000, -6000, -3000, -1000, 1000, 3000, 6000, 12000};  
   for(int i = 0; i < 8; i++) {
     if (sensorValues[i] > LIMIAR_LINHA) {
       somaPonderada += posicoes[i];
