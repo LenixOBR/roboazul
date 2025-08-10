@@ -600,7 +600,7 @@ void virarComGiro(float angulo, int direcao) {
     yawAtual = novoYaw;
 
     float erro = angulo - fabs(giroAcumulado);
-    int vel = map(erro, 0, angulo, VEL_CURVA - 10, VEL_CURVA_EXTREMA);
+    int vel = map(erro, 0, angulo, VEL_CURVA, VEL_CURVA_EXTREMA);
     vel = constrain(vel, 50, VEL_CURVA);
 
     if (direcao == DIREITA)
