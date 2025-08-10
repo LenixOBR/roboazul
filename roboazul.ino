@@ -15,8 +15,8 @@ QTRSensors qtr;
 #define LEDB 42
 #define TRIGGER_PIN  40
 #define ECHO_PIN     39
-#define CALIB_FLAG  34
-#define LED1 38
+#define CALIB_FLAG  34 //conecte no GND para calibrar os sensores QTR
+#define LED1 38 
 #define LED2 37
 #define LED3 35
 #define LED4 36
@@ -27,11 +27,11 @@ QTRSensors qtr;
 
 #define TEMPO_PRE90 1000
 #define TEMPO_ORBITA 2000
-#define VEL_NORMAL 150
+#define VEL_NORMAL 105
 #define VEL_RESISTENCIA 120
 #define VEL_CURVA 140
 #define VEL_CURVA_EXTREMA 220
-#define INTERVALO_LEITURA 50
+#define INTERVALO_LEITURA 0
 #define DISTANCIA_OBSTACULO 10
 #define DISTANCIA_PARADA 15
 #define DISTANCIA_MINIMA_VIRADA 10
@@ -47,9 +47,9 @@ QTRSensors qtr;
 #define MAX_FALHAS_CONTINUAS 10
 #define MAX_BUFFER_CORES 10
 
-#define KP 100.0f
+#define KP 90.0f
 #define KI 0.0f
-#define KD 10.0f
+#define KD 2.0f
 
 // Enumerações com descrições detalhadas
 enum class Estado {
@@ -107,11 +107,10 @@ CorSensor corSensores[2];
 Cores bufferCores[MAX_BUFFER_CORES];
 int indiceBuffer = 0;
 
-bool sensorDigital[8] = {false};
-int contagemSaturacaoQTR[8] = {0};
-int contagemNormalQTR[8] = {0};
-bool sensorDefeituoso[8] = {false};
+unsigned int sensorValues[8];
 int sensoresValidos = 8;  // ou inicialize conforme necessário
+int validosDireita = 4;
+int validosEsquerda = 4;
 
 float media = 0.0;
 float ultimaMedia = 0.0;
@@ -182,6 +181,8 @@ bool loadQTRCalibrationFromEEPROM() {
 void setup() {
   Serial.begin(9600);
 
+  pinMode(CALIB_FLAG, INPUT_PULLUP); // Use pull-up so default is HIGH
+
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
   pinMode(LED3, OUTPUT);
@@ -215,8 +216,17 @@ void setup() {
   mpu.begin();
   for (int i = 0; i < MAX_TENTATIVAS_MPU; i++) {
     Log.verboseln("Tentativa %d de inicializar MPU...", i+1);
-    if (verificarMPU()) break;
+    if (verificarMPU()){
+      break;
+    }
     delay(100);
+  }
+
+  if (!mpuFuncionando) {
+    Log.error("Falha ao inicializar MPU6050 após %d tentativas. Verifique as conexões e o sensor.", MAX_TENTATIVAS_MPU);
+    ledBinOutput(ERRO_MPU);
+  } else {
+    Log.noticeln(F("MPU6050 inicializado com sucesso"));
   }
   
   Log.verboseln(F("Inicializando MPU6050..."));
@@ -241,9 +251,11 @@ void setup() {
   // Calibração dos sensores QTR
   Log.verboseln(F("Iniciando calibração dos sensores QTR..."));
   qtr.setTypeRC();
-  qtr.setSensorPins((const uint8_t[]){43, 44, 45, 46, 47, 48, 49, 50, 51}, 8);
+  qtr.setSensorPins((const uint8_t[]){43, 44, 45, 46, 47, 48, 49, 50}, 8);
+  qtr.setEmitterPin(51);
 
-  bool doCalib = digitalRead(CALIB_FLAG) == HIGH;
+  bool doCalib = digitalRead(CALIB_FLAG) == LOW; // Calibra se o pino estiver LOW
+  Log.verboseln("Calibração QTR: %s", doCalib);
   bool loaded = false;
   if (!doCalib) {
     loaded = loadQTRCalibrationFromEEPROM();
@@ -286,9 +298,6 @@ void setup() {
   Log.verboseln("Sensor de cor 1 (direita) - %s", corSensores[1].inicializado ? "OK" : "FALHA");
 
   // Rotina inicial
-  Log.verboseln(F("Vencendo resistência inicial dos motores..."));
-  vencerResistenciaInicial();
-  
   estadoAtual = Estado::INICIALIZANDO;
   Log.noticeln(F("Sistema inicializado com sucesso"));
   Log.noticeln(F("Estado inicial: SEGUINDO_LINHA"));
@@ -299,29 +308,20 @@ void loop() {
   Log.verboseln("Estado atual: %d", static_cast<int>(estadoAtual));
   
   switch(estadoAtual) {
-    case Estado::INICIALIZANDO:{
-      Log.warning(F("Estado INICIALIZANDO não deveria ser alcançado no loop"));
-      estadoAtual = Estado::SEGUINDO_LINHA;
-      return;
-    }
     case Estado::SEGUINDO_LINHA: {
       Log.verboseln(F("Executando SEGUINDO_LINHA..."));
       ledBinOutput(OP_SEGUINDO_LINHA);
+
       lerSensores();
       media = calcularPosicaoLinha();
-      Log.verboseln("Posição média da linha: %F", media);
 
       int distancia = sonar.ping_cm();
-      Log.verboseln("Distância do obstáculo: %d cm", distancia);
-      
       if (distancia < DISTANCIA_OBSTACULO && distancia != 0) {
-        Log.noticeln(F("Obstáculo detectado! Mudando para DESVIANDO_OBSTACULO"));
         estadoAtual = Estado::DESVIANDO_OBSTACULO;
         return;
       }
 
       if (media == 69) {
-        Log.noticeln(F("Bifurcação detectada! Mudando para RESOLVENDO_BIFURCACAO"));
         estadoAtual = Estado::RESOLVENDO_BIFURCACAO;
         return;
       }
@@ -329,16 +329,17 @@ void loop() {
       float correcaoPID = KP * media + KD * (ultimaMedia - media); 
       ultimaMedia = media;
 
-      Log.verbose(" Correção PID: %c", correcaoPID);
-
-      int velocidade1 = VEL_NORMAL - correcaoPID;
-      int velocidade2 = VEL_NORMAL + correcaoPID;
-
-      Log.verboseln("ESQ: %d -- DIR: %d", velocidade1, velocidade2);
+      int velocidade1 = VEL_NORMAL + correcaoPID;
+      int velocidade2 = VEL_NORMAL - correcaoPID;
 
       controleFino(velocidade1, velocidade2);
-      
+      // Remove delay para máxima velocidade
       break;
+    }
+    case Estado::INICIALIZANDO:{
+      Log.warning(F("Estado INICIALIZANDO não deveria ser alcançado no loop"));
+      estadoAtual = Estado::SEGUINDO_LINHA;
+      return;
     }
     case Estado::RESOLVENDO_BIFURCACAO: {
       Log.noticeln(F("Iniciando RESOLVENDO_BIFURCACAO..."));
@@ -386,73 +387,22 @@ void loop() {
 }
 
 void lerSensores() {
-  unsigned int sensorValues[8];
   qtr.readCalibrated(sensorValues); // Lê todos os 8 sensores do QTR-8RC
-  
-  for (int i = 0; i < 8; i++) {
-    // Verifica se está saturado
-    if (sensorValues[i] >= 1000) {
-      contagemSaturacaoQTR[i]++;
-      contagemNormalQTR[i] = 0;  // Zera contador de leituras normais
-    } else {
-      contagemSaturacaoQTR[i] = 0;
-      contagemNormalQTR[i]++;    // Conta quantas vezes o sensor está normal
-    }
-
-    // Marca sensor como defeituoso se estiver saturando por muito tempo
-    if (contagemSaturacaoQTR[i] >= MAX_SATURACAO_SEGUIDA && !sensorDefeituoso[i]) {
-      sensorDefeituoso[i] = true;
-      sensoresValidos--;
-      Log.warning("Sensor %d marcado como defeituoso!", i);
-    }
-
-    // Revive sensor se voltou ao normal por tempo suficiente
-    if (sensorDefeituoso[i] && contagemNormalQTR[i] >= MAX_NORMAL_SEGUIDO) {
-      sensorDefeituoso[i] = false;
-      sensoresValidos++;
-      Log.notice("Sensor QTR %d voltou ao funcionamento normal.", i);
-    }
-
-    // Ignora sensores defeituosos na leitura digital
-    if (sensorDefeituoso[i]) {
-      sensorDigital[i] = 0;
-      Log.verboseln("Sensor %d: Defeituoso", i);
-      continue;
-    }
-
-    sensorDigital[i] = sensorValues[i] > LIMIAR_LINHA ? 1 : 0;
-    Log.verboseln("Sensor %d: %d -- Linha: %t -- ContNormal: %d -- ContSaturacao: %d", i, sensorValues[i], sensorDigital[i], contagemNormalQTR[i], contagemSaturacaoQTR[i]);
-  }
 }
 
 float calcularPosicaoLinha() {
+  int somaPonderada = 0;
   int total = 0;
-  float somaPonderada = 0;
-
+  const int posicoes[8] = {-8000, -4000, -2000, -1000, 1000, 2000, 4000, 8000};
   for(int i = 0; i < 8; i++) {
-    int valor = sensorDigital[i];
-    total += valor;
-
-    // Peso mais forte: exponencial centrada em 3.5
-    float peso = pow((i - 3.5), 3);  // Cubo enfatiza sensores das extremidades
-    somaPonderada += valor * peso;
+    if (sensorValues[i] > LIMIAR_LINHA) {
+      somaPonderada += posicoes[i];
+      total++;
+    }
   }
-
-  if(sensoresValidos == 0) {
-    ledBinOutput(ERRO_QTR_SATURADO);
-    return 0;
-  }
-
-  // Linha larga ou cruzamento
-  if(total >= sensoresValidos - 1) return 69;
-
-  // Fator de amplificação baseado na quantidade de sensores ativados
-  float fatorMultiplicador = 1 + (sensoresValidos - 1) * 0.2;
-
-  // Normaliza e aplica fator
-  return (somaPonderada / (pow(3.5, 3) * total)) * fatorMultiplicador;
+  if (total == 0) return 0;
+  return somaPonderada / total / 1000;
 }
-
 
 void resolverBifurcacao() {
   Log.verboseln("Resolverbifurcacao()");
@@ -470,8 +420,6 @@ void resolverBifurcacao() {
     delay(500);  // Ou lidar de forma mais inteligente
     return;
   }
-
-  vencerResistenciaInicial();
 
   if (corA == PRETO && corB == PRETO) {
     andarTras();
@@ -635,14 +583,14 @@ void controlarMotores(int esq, int dir, int vel = VEL_NORMAL) {
   motorTrasEsquerdo.setSpeed(vel);
   motorTrasDireito.setSpeed(vel);
   motorFrenteEsquerdo.run(esq ? FORWARD : BACKWARD);
-  motorTrasEsquerdo.run(esq ? FORWARD : BACKWARD);
   motorFrenteDireito.run(dir ? FORWARD : BACKWARD);
+  motorTrasEsquerdo.run(esq ? FORWARD : BACKWARD);
   motorTrasDireito.run(dir ? FORWARD : BACKWARD);
 }
 
 void controleFino(int esq, int dir) {
-  int absEsq = abs(esq);
-  int absDir = abs(dir);
+  int absEsq = constrain(abs(esq), 0, 255);
+  int absDir = constrain(abs(dir), 0, 255);
   motorFrenteEsquerdo.setSpeed(absEsq);
   motorFrenteDireito.setSpeed(absDir);
   motorTrasEsquerdo.setSpeed(absEsq);
