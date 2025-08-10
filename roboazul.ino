@@ -25,14 +25,14 @@ QTRSensors qtr;
 #define DIREITA 0
 #define ESQUERDA 1
 
+#define INTERVALO_LEITURA 5
 #define TEMPO_PRE90 1000
-#define TEMPO_ORBITA 2000
+#define TEMPO_ORBITA 750
 #define VEL_NORMAL 105
 #define VEL_RESISTENCIA 120
-#define VEL_CURVA 140
+#define VEL_CURVA 130
 #define VEL_CURVA_EXTREMA 220
-#define INTERVALO_LEITURA 0
-#define DISTANCIA_OBSTACULO 10
+#define DISTANCIA_OBSTACULO 15
 #define DISTANCIA_PARADA 15
 #define DISTANCIA_MINIMA_VIRADA 10
 #define LIMIAR_LINHA 900
@@ -272,6 +272,9 @@ void setup() {
     Log.noticeln(F("Calibração QTR concluída"));
     saveQTRCalibrationToEEPROM();
     Log.noticeln(F("Calibração QTR salva na EEPROM."));
+    while (true) {
+      ledBinOutput(OP_PARADO);
+    }
   }
 
   ledBinOutput(OP_INICIALIZANDO);
@@ -310,14 +313,15 @@ void loop() {
     case Estado::SEGUINDO_LINHA: {
       ledBinOutput(OP_SEGUINDO_LINHA);
 
-      lerSensores();
-      media = calcularPosicaoLinha();
-
       int distancia = sonar.ping_cm();
+      Log.verboseln("Distância medida: %d cm", distancia);
       if (distancia < DISTANCIA_OBSTACULO && distancia != 0) {
         estadoAtual = Estado::DESVIANDO_OBSTACULO;
         return;
       }
+
+      lerSensores();
+      media = calcularPosicaoLinha();
 
       if (media == 69) {
         estadoAtual = Estado::RESOLVENDO_BIFURCACAO;
@@ -373,6 +377,7 @@ void loop() {
       return;
     }
     case Estado::DESVIANDO_OBSTACULO: {
+      ledBinOutput(OP_DESVIANDO_OBSTACULO);
       Log.noticeln(F("Iniciando desvio de obstáculo..."));
       desviarObstaculo();
       Log.noticeln(F("Obstáculo desviado. Voltando para SEGUINDO_LINHA"));
@@ -388,6 +393,32 @@ void loop() {
       Log.warningln("PORQUE RAIOS ESTÁ NO DEFAULT? ISSO NÃO É POSSIVEL! O ESTADO ATUAL É: %d", estadoAtual);
     }
   }
+  delay(INTERVALO_LEITURA); 
+}
+
+void controlarMotores(int esq, int dir, int vel = VEL_NORMAL) {
+  motorFrenteEsquerdo.setSpeed(vel);
+  motorFrenteDireito.setSpeed(vel);
+  motorTrasEsquerdo.setSpeed(vel);
+  motorTrasDireito.setSpeed(vel);
+  motorFrenteEsquerdo.run(esq ? FORWARD : BACKWARD);
+  motorFrenteDireito.run(dir ? FORWARD : BACKWARD);
+  motorTrasEsquerdo.run(esq ? FORWARD : BACKWARD);
+  motorTrasDireito.run(dir ? FORWARD : BACKWARD);
+}
+
+void controleFino(int esq, int dir) {
+  int absEsq = constrain(abs(esq), 0, 255);
+  int absDir = constrain(abs(dir), 0, 255);
+  motorFrenteEsquerdo.setSpeed(absEsq);
+  motorFrenteDireito.setSpeed(absDir);
+  motorTrasEsquerdo.setSpeed(absEsq);
+  motorTrasDireito.setSpeed(absDir);
+  
+  motorFrenteEsquerdo.run((esq > 0) ? FORWARD : BACKWARD);
+  motorFrenteDireito.run((dir > 0) ? FORWARD : BACKWARD);
+  motorTrasEsquerdo.run((esq > 0) ? FORWARD : BACKWARD);
+  motorTrasDireito.run((dir > 0) ? FORWARD : BACKWARD);
 }
 
 void lerSensores() {
@@ -405,6 +436,7 @@ float calcularPosicaoLinha() {
     }
   }
   if (total == 0) return 0;
+  if (total == 8) return 69; // Indica bifurcação ou linha completa
   return somaPonderada / total / 1000;
 }
 
@@ -450,7 +482,7 @@ void resolverBifurcacao() {
 
 void desviarObstaculo() {
   pararMotores(); delay(100);
-  virar90(ESQUERDA); delay(100);
+  virar90(DIREITA); delay(100);
   andarReto(); delay(TEMPO_ORBITA / 2);
   unsigned long ultimaVirada = millis();
 
@@ -459,14 +491,14 @@ void desviarObstaculo() {
     float HaLinha = calcularPosicaoLinha();
     if (HaLinha != 0) {
       pararMotores();
-      virar90(ESQUERDA);
+      virar90(DIREITA);
       return;
     }
 
     andarReto();
-    if (millis() - ultimaVirada >= 2000) {
+    if (millis() - ultimaVirada >= TEMPO_ORBITA) {
       pararMotores(); delay(100);
-      virar90(DIREITA); delay(100);
+      virar90(ESQUERDA); delay(100);
       ultimaVirada = millis();
     }
     delay(10);
@@ -539,79 +571,59 @@ void virar90(int direcao) {
 
 void virarComGiro(float angulo, int direcao) {
   pararMotores();
-  
+
   if (!verificarMPU()) {
     Serial.println("MPU não detectada! Girando sem correção...");
     virarForte(direcao);
-    delay(angulo * 10);  // valor empírico
+    delay(angulo * 10);
     pararMotores();
     return;
   }
 
   mpu.read();
   float yawInicial = mpu.getYaw();
+  float yawAtual = yawInicial;
+  float giroAcumulado = 0;
 
-  // Define o alvo com adição ou subtração simples
-  float alvoYaw = yawInicial + (direcao == DIREITA ? angulo : -angulo);
+  const float margem = 2.0; // tolerância final
 
-  Serial.print("Yaw inicial: ");
-  Serial.println(yawInicial);
-  Serial.print("Alvo Yaw: ");
-  Serial.println(alvoYaw);
-
-  while (true) {
+  while (fabs(giroAcumulado) < angulo - margem) {
     mpu.read();
-    float yawAtual = mpu.getYaw();
+    float novoYaw = mpu.getYaw();
 
-    float restante = (direcao == DIREITA) ? (yawAtual - alvoYaw) : (alvoYaw - yawAtual);
+    // Diferença entre leituras sucessivas (-180~180)
+    float delta = novoYaw - yawAtual;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
 
-    Serial.print("Yaw atual: ");
-    Serial.println(yawAtual);
-    Serial.print("Restante: ");
-    Serial.println(restante);
+    giroAcumulado += delta;
+    yawAtual = novoYaw;
 
-    // Verifica se já passou ou chegou no alvo
-    if (restante < 10) break;
+    float erro = angulo - fabs(giroAcumulado);
+    int vel = map(erro, 0, angulo, VEL_CURVA - 10, VEL_CURVA_EXTREMA);
+    vel = constrain(vel, 50, VEL_CURVA);
 
-    virar(direcao);
-    delay(10);  // controle simples de loop
+    if (direcao == DIREITA)
+      controlarMotores(ESQUERDA, DIREITA, vel);
+    else
+      controlarMotores(DIREITA, ESQUERDA, vel);
+
+
+    delay(10);
   }
 
   pararMotores();
-  Serial.println("Giro finalizado.");
+  delay(80);
 }
 
-void controlarMotores(int esq, int dir, int vel = VEL_NORMAL) {
-  motorFrenteEsquerdo.setSpeed(vel);
-  motorFrenteDireito.setSpeed(vel);
-  motorTrasEsquerdo.setSpeed(vel);
-  motorTrasDireito.setSpeed(vel);
-  motorFrenteEsquerdo.run(esq ? FORWARD : BACKWARD);
-  motorFrenteDireito.run(dir ? FORWARD : BACKWARD);
-  motorTrasEsquerdo.run(esq ? FORWARD : BACKWARD);
-  motorTrasDireito.run(dir ? FORWARD : BACKWARD);
-}
 
-void controleFino(int esq, int dir) {
-  int absEsq = constrain(abs(esq), 0, 255);
-  int absDir = constrain(abs(dir), 0, 255);
-  motorFrenteEsquerdo.setSpeed(absEsq);
-  motorFrenteDireito.setSpeed(absDir);
-  motorTrasEsquerdo.setSpeed(absEsq);
-  motorTrasDireito.setSpeed(absDir);
-  
-  motorFrenteEsquerdo.run((esq > 0) ? FORWARD : BACKWARD);
-  motorFrenteDireito.run((dir > 0) ? FORWARD : BACKWARD);
-  motorTrasEsquerdo.run((esq > 0) ? FORWARD : BACKWARD);
-  motorTrasDireito.run((dir > 0) ? FORWARD : BACKWARD);
-}
 
 void pararMotores() { controlarMotores(1, 1, 0); }
 void andarReto()     { controlarMotores(1, 1, VEL_NORMAL); }
 void andarRapido()   { controlarMotores(1, 1, 200); }
 void andarTras()     { controlarMotores(0, 0, VEL_NORMAL + 10); }
-void virar(int d)    { controlarMotores(d, !d, VEL_CURVA); }
-void virarForte(int d){ controlarMotores(d, !d, VEL_CURVA_EXTREMA); }
+void virar(int direcao)    { controlarMotores(direcao, !direcao, VEL_CURVA); }
+void virarForte(int direcao){ controlarMotores(direcao, !direcao, VEL_CURVA_EXTREMA); }
 
 void vencerResistenciaInicial() {
   controlarMotores(1, 1, VEL_RESISTENCIA);
