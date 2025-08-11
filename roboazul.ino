@@ -49,7 +49,7 @@ QTRSensors qtr;
 
 #define KP 90.0f
 #define KI 0.0f
-#define KD 6.0f
+#define KD 10.0f
 
 // Enumerações com descrições detalhadas
 enum class Estado {
@@ -75,10 +75,13 @@ enum Codigos {
 };
 
 enum Cores {
-  PRETO,     // Cor preta (linha)
-  BRANCO,    // Cor branca (fora da linha)
-  COLORIDO,  // Cor colorida (marcações especiais)
-  ERRO       // Erro na leitura de cor
+  PRETO,
+  BRANCO,
+  VERMELHO,
+  VERDE,
+  AZUL,
+  CINZA,
+  ERRO
 };
 
 struct CorSensor {
@@ -457,20 +460,11 @@ void resolverBifurcacao() {
     return;
   }
 
-  if (corA == PRETO && corB == PRETO) {
-    andarTras();
-    delay(500);
-  } else if (corA == PRETO) {
-    virarForte(DIREITA);
-    delay(50);
-  } else if (corB == PRETO) {
-    virarForte(ESQUERDA);
-    delay(50);
-  } else if (corA == COLORIDO && corB != COLORIDO) {
+  if (corA == VERDE && corB != VERDE) {
     virar90(ESQUERDA);
-  } else if (corB == COLORIDO && corA != COLORIDO) {
+  } else if (corB == VERDE && corA != VERDE) {
     virar90(DIREITA);
-  } else if (corA == COLORIDO && corB == COLORIDO) {
+  } else if (corA == VERDE && corB == VERDE) {
     virar90(DIREITA);
     virar90(DIREITA);
   } else {
@@ -510,25 +504,15 @@ void atualizarBufferCor(Cores novaCor) {
   indiceBuffer = (indiceBuffer + 1) % MAX_BUFFER_CORES;
 }
 
-bool detectarParadaVermelho() {
-  int brancoSeguido = 0;
-  bool viuColorido = false;
-  for (int i = 0; i < MAX_BUFFER_CORES; i++) {
-    int idx = (indiceBuffer + i) % MAX_BUFFER_CORES;
-    if (bufferCores[idx] == COLORIDO) viuColorido = true;
-    if (viuColorido && bufferCores[idx] == BRANCO) brancoSeguido++;
-  }
-  return viuColorido && brancoSeguido >= 4;
-}
-
 Cores detectarCor(uint8_t canal) {
   if (canal > 1 || !corSensores[canal].inicializado) {
+    // Fallback usando QTR caso o sensor de cor não esteja disponível
     unsigned int sensorValues[8];
     qtr.readCalibrated(sensorValues);
     int soma = 0;
     for (int i = 0; i < 8; i++) soma += sensorValues[i];
     int media = soma / 8;
-    if (media > 400 && media < 900) return COLORIDO;
+    if (media > 400 && media < 900) return VERDE; // fallback supõe marca verde
     return PRETO;
   }
 
@@ -536,9 +520,24 @@ Cores detectarCor(uint8_t canal) {
   uint16_t r, g, b, c;
   corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
 
-  if (r < 3000 && g < 4400 && b < 3400) return PRETO;
-  if (r > 6000 && g > 7500 && b > 6500) return BRANCO;
-  return COLORIDO;
+  // Brancos e pretos
+  if (r > 4000 && g > 4000 && b > 4000) return BRANCO;
+  if (r < 1000 && g < 1000 && b < 1000) return PRETO;
+
+  // Cinza — valores intermediários e parecidos
+  if (abs((int)r - (int)g) < 500 &&
+      abs((int)r - (int)b) < 500 &&
+      abs((int)g - (int)b) < 500) {
+    return CINZA;
+  }
+
+  // Determina cor predominante
+  if (g > r && g > b) return VERDE;
+  if (r > g && r > b) return VERMELHO;
+  if (b > r && b > g) return AZUL;
+
+  // Se empatar ou não for detectável
+  return ERRO;
 }
 
 bool verificarMPU() {
