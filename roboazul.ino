@@ -35,7 +35,7 @@ QTRSensors qtr;
 #define DISTANCIA_OBSTACULO 15
 #define DISTANCIA_PARADA 15
 #define DISTANCIA_MINIMA_VIRADA 10
-#define LIMIAR_LINHA 900
+#define LIMIAR_LINHA 995
 
 #define MAX_SATURACAO_SEGUIDA 50     // Número de leituras saturadas seguidas para considerar defeituoso
 #define MAX_NORMAL_SEGUIDO 50        // Número de leituras normais seguidas para reviver
@@ -49,7 +49,7 @@ QTRSensors qtr;
 
 #define KP 90.0f
 #define KI 0.0f
-#define KD 10.0f
+#define KD 6.0f
 
 // Enumerações com descrições detalhadas
 enum class Estado {
@@ -356,6 +356,7 @@ void loop() {
       return;
     }
     case Estado::RESOLVENDO_BIFURCACAO: {
+      pararMotores();
       Log.noticeln(F("Iniciando RESOLVENDO_BIFURCACAO..."));
       ledBinOutput(OP_RESOLVENDO_BIFURCACAO);
     
@@ -519,6 +520,8 @@ Cores detectarCor(uint8_t canal) {
   tcaSelect(canal);
   uint16_t r, g, b, c;
   corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
+
+  Log.verboseln("R:%d G:%d B:%d", r, g, b);
 
   // Brancos e pretos
   if (r > 4000 && g > 4000 && b > 4000) return BRANCO;
