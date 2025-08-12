@@ -443,7 +443,7 @@ float calcularPosicaoLinha() {
     }
   }
   if (total == 0) return 0;
-  if (total == 8) return 69; // Indica bifurcação ou linha completa
+  if (total >= 7) return 69; // Indica bifurcação ou linha completa
   return somaPonderada / total / 1000;
 }
 
@@ -529,13 +529,13 @@ Cores detectarCor(uint8_t canal) {
   tcaSelect(2);
 
   // Brancos e pretos
-  if (r > 4000 && g > 4000 && b > 4000) return BRANCO;
+  if (r > 3000 && g > 3500 && b > 3000) return BRANCO;
   if (r < 1000 && g < 1000 && b < 1000) return PRETO;
 
   // Cinza — valores intermediários e parecidos
-  if (abs((int)r - (int)g) < 500 &&
-      abs((int)r - (int)b) < 500 &&
-      abs((int)g - (int)b) < 500) {
+  if (abs((int)r - (int)g) < 200 &&
+      abs((int)r - (int)b) < 200 &&
+      abs((int)g - (int)b) < 200) {
     return CINZA;
   }
 
