@@ -56,6 +56,7 @@ enum class Estado {
   SEGUINDO_LINHA,       // Estado normal de seguimento de linha
   RESOLVENDO_BIFURCACAO, // Encontrou uma bifurcação na pista
   DESVIANDO_OBSTACULO,   // Detectou obstáculo e está desviando
+  SALA_RESGATE,
   PARADO,                // Robô parado (emergência ou final de percurso)
   INICIALIZANDO          // Estado inicial durante boot
 };
@@ -71,6 +72,8 @@ enum Codigos {
   ERRO_QTR_SATURADO = 8,       // 1000 - Erro nos sensores de linha QTR
   ERRO_I2C = 9,                // 1001 - Erro de comunicação I2C
   CALIBRANDO = 10,             // 1010 - Calibrando
+  ERRO_TCS_CENTRAL = 11,       //1011 - Erro no sensor de cor central 
+  OP_SALA_RESGATE = 12,       // 1100 - na sala de resgate
   OP_INICIALIZANDO = 15     // 1111 - Inicializando
 };
 
@@ -306,7 +309,7 @@ void setup() {
   tcaSelect(2); 
   corSensores[3].inicializado = corSensores[1].tcs.begin();
   Log.verboseln("Sensor de cor 3 (especial) - %s", corSensores[3].inicializado ? "OK" : "FALHA");
-  
+
   // Rotina inicial
   estadoAtual = Estado::INICIALIZANDO;
   Log.noticeln(F("Sistema inicializado com sucesso"));
@@ -326,6 +329,15 @@ void loop() {
         return;
       }
 
+      Cores corCentral = detectarCor(2);
+
+      if (corCentral == VERMELHO) {
+        estadoAtual = Estado::PARADO;
+        return;
+      } else if (corCentral == CINZA) {
+        estadoAtual = Estado::SALA_RESGATE;
+        return;
+      }
       lerSensores();
       media = calcularPosicaoLinha();
 
@@ -347,6 +359,7 @@ void loop() {
       ultimaMedia = media;
       
       int velocidade1 = VEL_NORMAL - correcaoPID;
+
       int velocidade2 = VEL_NORMAL + correcaoPID;
 
       controleFino(velocidade1, velocidade2);
@@ -388,6 +401,12 @@ void loop() {
       Log.noticeln(F("Iniciando desvio de obstáculo..."));
       desviarObstaculo();
       Log.noticeln(F("Obstáculo desviado. Voltando para SEGUINDO_LINHA"));
+      estadoAtual = Estado::SEGUINDO_LINHA;
+      break;
+    }
+    case Estado::SALA_RESGATE:{
+      ledBinOutput(OP_SALA_RESGATE);
+      salaDeResgate();
       estadoAtual = Estado::SEGUINDO_LINHA;
       break;
     }
@@ -445,6 +464,19 @@ float calcularPosicaoLinha() {
   if (total == 0) return 0;
   if (total >= 7) return 69; // Indica bifurcação ou linha completa
   return somaPonderada / total / 1000;
+}
+
+int lerUltrassonicoAngulo(NewPing &sonar, int deg) {
+  servoUltrassonico.write(deg);
+  delay(700);
+
+  int leituraUltrassonica = sonar.ping_cm();
+
+  delay(20);
+
+  servoUltrassonico.write(90);
+  
+  return leituraUltrassonica;
 }
 
 void resolverBifurcacao() {
@@ -704,4 +736,35 @@ void ledBinOutput(int code) {
 
   ultimaAtualizacaoLED = agora;
   ultimoCodigoMostrado = code;
+}
+
+void salaDeResgate() {
+  NewPing sonarLongo(TRIGGER_PIN, ECHO_PIN, 400);
+
+  while (true) {
+    andarReto();
+
+    lerSensores();
+    int Saimos = calcularPosicaoLinha();
+    if (Saimos != 0) return;
+
+    int distanciaParede = sonarLongo.ping_cm();
+    if (distanciaParede != 0 && distanciaParede < DISTANCIA_OBSTACULO) {
+      pararMotores();
+      int distanciaEsquerda = lerUltrassonicoAngulo(sonarLongo, 0);
+      int distanciaDireita = lerUltrassonicoAngulo(sonarLongo, 180);
+
+      if (distanciaEsquerda > distanciaDireita) {
+        virar90(ESQUERDA);
+      } else if (distanciaDireita > distanciaEsquerda) {
+        virar90(DIREITA);
+      } else {
+        if (random(0, 2) == 0) {
+            virar90(ESQUERDA);
+        } else {
+            virar90(DIREITA);
+        }
+      } 
+    }
+  }
 }
