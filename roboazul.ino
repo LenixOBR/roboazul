@@ -106,7 +106,7 @@ AF_DCMotor motorFrenteDireito(1);
 AF_DCMotor motorTrasEsquerdo(3);
 AF_DCMotor motorTrasDireito(2);
 
-CorSensor corSensores[2];
+CorSensor corSensores[3];
 Cores bufferCores[MAX_BUFFER_CORES];
 int indiceBuffer = 0;
 
@@ -303,6 +303,10 @@ void setup() {
   corSensores[1].inicializado = corSensores[1].tcs.begin();
   Log.verboseln("Sensor de cor 1 (direita) - %s", corSensores[1].inicializado ? "OK" : "FALHA");
 
+  tcaSelect(2); 
+  corSensores[3].inicializado = corSensores[1].tcs.begin();
+  Log.verboseln("Sensor de cor 3 (especial) - %s", corSensores[3].inicializado ? "OK" : "FALHA");
+  
   // Rotina inicial
   estadoAtual = Estado::INICIALIZANDO;
   Log.noticeln(F("Sistema inicializado com sucesso"));
@@ -317,7 +321,6 @@ void loop() {
       ledBinOutput(OP_SEGUINDO_LINHA);
 
       int distancia = sonar.ping_cm();
-      Log.verboseln("Distância medida: %d cm", distancia);
       if (distancia < DISTANCIA_OBSTACULO && distancia != 0) {
         estadoAtual = Estado::DESVIANDO_OBSTACULO;
         return;
@@ -506,7 +509,7 @@ void atualizarBufferCor(Cores novaCor) {
 }
 
 Cores detectarCor(uint8_t canal) {
-  if (canal > 1 || !corSensores[canal].inicializado) {
+  if (canal > 2 || !corSensores[canal].inicializado) {
     // Fallback usando QTR caso o sensor de cor não esteja disponível
     unsigned int sensorValues[8];
     qtr.readCalibrated(sensorValues);
@@ -518,6 +521,34 @@ Cores detectarCor(uint8_t canal) {
   }
 
   tcaSelect(canal);
+  uint16_t r, g, b, c;
+  corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
+
+  Log.verboseln("R:%d G:%d B:%d", r, g, b);
+
+  tcaSelect(2);
+
+  // Brancos e pretos
+  if (r > 4000 && g > 4000 && b > 4000) return BRANCO;
+  if (r < 1000 && g < 1000 && b < 1000) return PRETO;
+
+  // Cinza — valores intermediários e parecidos
+  if (abs((int)r - (int)g) < 500 &&
+      abs((int)r - (int)b) < 500 &&
+      abs((int)g - (int)b) < 500) {
+    return CINZA;
+  }
+
+  // Determina cor predominante
+  if (g > r && g > b) return VERDE;
+  if (r > g && r > b) return VERMELHO;
+  if (b > r && b > g) return AZUL;
+
+  // Se empatar ou não for detectável
+  return ERRO;
+}
+
+Cores quickDetectarCor(uint8_t canal) {
   uint16_t r, g, b, c;
   corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
 
