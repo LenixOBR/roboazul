@@ -18,8 +18,8 @@ QTRSensors qtr;
 #define CALIB_FLAG  34 //conecte no GND para calibrar os sensores QTR
 #define LED1 38 
 #define LED2 37
-#define LED3 35
-#define LED4 36
+#define LED3 36
+#define LED4 35
 #define MAX_DISTANCE 50
 #define TCAADDR 0x70
 #define DIREITA 0
