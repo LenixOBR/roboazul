@@ -393,6 +393,7 @@ void setup()
 
   // Rotina inicial
   estadoAtual = Estado::INICIALIZANDO;
+  estadoAtual = Estado::SALA_RESGATE;
   Log.noticeln(F("Sistema inicializado com sucesso"));
   Log.noticeln(F("Estado inicial: SEGUINDO_LINHA"));
 }
