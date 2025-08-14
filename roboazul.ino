@@ -37,7 +37,7 @@ Tabela
 #define VEL_RESISTENCIA 120
 #define VEL_CURVA 130
 #define VEL_CURVA_EXTREMA 220
-#define DISTANCIA_OBSTACULO 15
+#define DISTANCIA_OBSTACULO 7
 #define DISTANCIA_PARADA 15
 #define DISTANCIA_MINIMA_VIRADA 10
 #define LIMIAR_LINHA 995
@@ -52,7 +52,7 @@ Tabela
 #define MAX_FALHAS_CONTINUAS 10
 #define MAX_BUFFER_CORES 10
 
-#define KP 85.0f
+#define KP 90.0f
 #define KI 0.0f
 #define KD 6.0f
 
@@ -136,17 +136,15 @@ float ultimaMedia = 0.0;
 #define QTR_EEPROM_MAGIC 0xA5A5
 #define QTR_EEPROM_SIZE (2 + 2 + 8 * 2 * 2 + 2) // magic + sensorCount + min/max for 8 sensors (on/off) + CRC
 
-// ======= Limiares de Cor =======
-#define LIMIAR_BRANCO_R     9000
-#define LIMIAR_BRANCO_G     9000
-#define LIMIAR_BRANCO_B     9000
-
-#define LIMIAR_PRETO_R      1500
-#define LIMIAR_PRETO_G      1700
-#define LIMIAR_PRETO_B      1500
-
-#define TOLERANCIA_CINZA    400    // Diferença máxima entre canais para ser CINZA
-#define FATOR_PREDOMINANCIA 1.20f  // 20% a mais para evitar falsos positivos+
+// ====== Configuração de limiares ======
+#define LIMIAR_BRANCO        9000  // Branco puro (todos os canais acima)
+#define LIMIAR_BRANCO_SUJO   3500  // Média mínima para branco sujo
+#define TOL_BRANCO_SUJO      1750  // Diferença máxima entre canais para branco sujo
+#define LIMIAR_PRETO_R       1600
+#define LIMIAR_PRETO_G       1700
+#define LIMIAR_PRETO_B       1600
+#define TOLERANCIA_CINZA     300   // Diferença máxima entre canais para cinza
+#define FATOR_PREDOMINANCIA  1.05f // Quanto um canal deve ser maior para ser predominantew
 
 // CRC-16-CCITT
 uint16_t crc16(const uint8_t *data, size_t len)
@@ -408,6 +406,7 @@ void loop()
     ledBinOutput(OP_SEGUINDO_LINHA);
 
     int distancia = sonar.ping_cm();
+    Log.verboseln("%d", distancia);
     if (distancia < DISTANCIA_OBSTACULO && distancia != 0)
     {
       estadoAtual = Estado::DESVIANDO_OBSTACULO;
@@ -564,10 +563,12 @@ float calcularPosicaoLinha()
       total++;
     }
   }
+  if (total == 8) {
+    pararMotores();
+    return 69; // Indica bifurcação ou linha complet
+  }
   if (total == 0)
     return 0;
-  if (total >= 7)
-    return 69; // Indica bifurcação ou linha completa
   return somaPonderada / total / 1000;
 }
 
@@ -665,68 +666,71 @@ void atualizarBufferCor(Cores novaCor)
   indiceBuffer = (indiceBuffer + 1) % MAX_BUFFER_CORES;
 }
 
-// ---- Função genérica de classificação ----
-static inline Cores classificarCor(uint16_t r, uint16_t g, uint16_t b) {
-  // Branco
-  if (r > LIMIAR_BRANCO_R && g > LIMIAR_BRANCO_G && b > LIMIAR_BRANCO_B)
-    return BRANCO;
+// ====== Função genérica para classificar uma cor ======
+Cores classificarCor(uint16_t r, uint16_t g, uint16_t b) {
+    Log.verboseln("R:%d G:%d B:%d", r, g, b);
 
-  // Preto
-  if (r < LIMIAR_PRETO_R && g < LIMIAR_PRETO_G && b < LIMIAR_PRETO_B)
-    return PRETO;
+    // 1. Branco puro
+    if (r > LIMIAR_BRANCO && g > LIMIAR_BRANCO && b > LIMIAR_BRANCO)
+        return BRANCO;
 
-  // Cinza
-  if (abs((int)r - (int)g) < TOLERANCIA_CINZA &&
-      abs((int)r - (int)b) < TOLERANCIA_CINZA &&
-      abs((int)g - (int)b) < TOLERANCIA_CINZA)
-    return CINZA;
+    // 2. Branco sujo (média alta e pouca diferença entre canais)
+    int media = (r + g + b) / 3;
+    if (media > LIMIAR_BRANCO_SUJO &&
+        abs((int)r - (int)g) < TOL_BRANCO_SUJO &&
+        abs((int)r - (int)b) < TOL_BRANCO_SUJO &&
+        abs((int)g - (int)b) < TOL_BRANCO_SUJO)
+        return BRANCO;
 
-  // Predominância
-  if (g > r * FATOR_PREDOMINANCIA && g > b * FATOR_PREDOMINANCIA)
-    return VERDE;
-  if (r > g * FATOR_PREDOMINANCIA && r > b * FATOR_PREDOMINANCIA)
-    return VERMELHO;
-  if (b > r * FATOR_PREDOMINANCIA && b > g * FATOR_PREDOMINANCIA)
-    return AZUL;
+    // 3. Preto
+    if (r < LIMIAR_PRETO_R && g < LIMIAR_PRETO_G && b < LIMIAR_PRETO_B)
+        return PRETO;
 
-  return ERRO;
+    // 4. Cinza
+    if (abs((int)r - (int)g) < TOLERANCIA_CINZA &&
+        abs((int)r - (int)b) < TOLERANCIA_CINZA &&
+        abs((int)g - (int)b) < TOLERANCIA_CINZA)
+        return CINZA;
+
+    // 5. Cores predominantes
+    if (g > r * FATOR_PREDOMINANCIA && g > b * FATOR_PREDOMINANCIA)
+        return VERDE;
+    if (r > g * FATOR_PREDOMINANCIA && r > b * FATOR_PREDOMINANCIA)
+        return VERMELHO;
+    if (b > r * FATOR_PREDOMINANCIA && b > g * FATOR_PREDOMINANCIA)
+        return AZUL;
+
+    // 6. Erro ou indefinido
+    return ERRO;
 }
 
-// ---- Detectar com TCA e fallback ----
+// ====== detectarCor() com fallback ======
 Cores detectarCor(uint8_t canal) {
-  if (canal > 2 || !corSensores[canal].inicializado) {
-    // Fallback usando QTR
-    unsigned int sensorValues[8];
-    qtr.readCalibrated(sensorValues);
-    int soma = 0;
-    for (int i = 0; i < 8; i++) soma += sensorValues[i];
-    int media = soma / 8;
-    if (media > 400 && media < 900) return VERDE;
-    return PRETO;
-  }
+    if (canal > 2 || !corSensores[canal].inicializado) {
+        unsigned int sensorValues[8];
+        qtr.readCalibrated(sensorValues);
+        int soma = 0;
+        for (int i = 0; i < 8; i++) soma += sensorValues[i];
+        int media = soma / 8;
+        if (media > 400 && media < 900)
+            return VERDE;
+        return PRETO;
+    }
 
-  tcaSelect(canal);
-  uint16_t r, g, b, c;
-  corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
-
-  Log.verboseln("R:%d G:%d B:%d", r, g, b);
-
-  // IMPORTANTE: deixar no canal 2 no final
-  tcaSelect(2);
-
-  return classificarCor(r, g, b);
+    tcaSelect(canal);
+    uint16_t r, g, b, c;
+    corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
+    tcaSelect(2); // deixa sempre no canal 2
+    return classificarCor(r, g, b);
 }
 
-// ---- Detectar rápido sem TCA ----
+// ====== quickDetectarCor() sem tcaSelect ======
 Cores quickDetectarCor(uint8_t canal) {
-  // Ignora o parâmetro canal, pois sempre lê do canal 2 já selecionado
-  uint16_t r, g, b, c;
-  corSensores[2].tcs.getRawData(&r, &g, &b, &c);
-
-  Log.verboseln("R:%d G:%d B:%d", r, g, b);
-
-  return classificarCor(r, g, b);
+    uint16_t r, g, b, c;
+    corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
+    return classificarCor(r, g, b);
 }
+
 bool verificarMPU()
 {
   static int tentativasFalhas = 0;
