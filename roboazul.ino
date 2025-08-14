@@ -499,12 +499,9 @@ void loop()
     break;
   }
   case Estado::SALA_RESGATE:
-  {
-    ledBinOutput(OP_SALA_RESGATE);
     salaDeResgate();
-    estadoAtual = Estado::SEGUINDO_LINHA;
+    estadoAtual = Estado::SEGUINDO_LINHA; // Volta a seguir linha após sair
     break;
-  }
   case Estado::PARADO:
   {
     Log.warning(F("ROBÔ PARADO!"));
