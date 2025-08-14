@@ -314,7 +314,7 @@ void setup()
   if (mpuFuncionando)
   {
     Log.verboseln(F("Calibrando MPU..."));
-    mpu.calibrate(500);
+    mpu.calibrate(2000);
     Log.noticeln(F("MPU6050 inicializado e calibrado"));
   }
   else
