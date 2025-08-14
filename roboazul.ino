@@ -312,7 +312,7 @@ void setup()
   if (mpuFuncionando)
   {
     Log.verboseln(F("Calibrando MPU..."));
-    mpu.calibrate(500);
+    mpu.calibrate(2000);
     Log.noticeln(F("MPU6050 inicializado e calibrado"));
   }
   else
@@ -391,6 +391,7 @@ void setup()
 
   // Rotina inicial
   estadoAtual = Estado::INICIALIZANDO;
+  estadoAtual = Estado::SALA_RESGATE;
   Log.noticeln(F("Sistema inicializado com sucesso"));
   Log.noticeln(F("Estado inicial: SEGUINDO_LINHA"));
 }
@@ -498,12 +499,9 @@ void loop()
     break;
   }
   case Estado::SALA_RESGATE:
-  {
-    ledBinOutput(OP_SALA_RESGATE);
     salaDeResgate();
-    estadoAtual = Estado::SEGUINDO_LINHA;
+    estadoAtual = Estado::SEGUINDO_LINHA; // Volta a seguir linha após sair
     break;
-  }
   case Estado::PARADO:
   {
     Log.warning(F("ROBÔ PARADO!"));
