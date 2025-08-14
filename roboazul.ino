@@ -28,7 +28,12 @@ QTRSensors qtr;
 #define INTERVALO_LEITURA 5
 #define TEMPO_PRE90 1000
 #define TEMPO_ORBITA 750
-#define VEL_NORMAL 105
+/*
+Tabela
+8V - 80 VEL
+*/
+
+#define VEL_NORMAL 80
 #define VEL_RESISTENCIA 120
 #define VEL_CURVA 130
 #define VEL_CURVA_EXTREMA 220
@@ -47,7 +52,7 @@ QTRSensors qtr;
 #define MAX_FALHAS_CONTINUAS 10
 #define MAX_BUFFER_CORES 10
 
-#define KP 90.0f
+#define KP 85.0f
 #define KI 0.0f
 #define KD 6.0f
 
@@ -108,10 +113,12 @@ const unsigned long INTERVALO_LED_MS = 200;
 int ultimoCodigoMostrado = -1;
 
 Servo servoUltrassonico;
-AF_DCMotor motorFrenteEsquerdo(4);
-AF_DCMotor motorFrenteDireito(1);
+// Por algum motivo, a primeira classe declarada sempre não funcionava, isso foi embora
+
 AF_DCMotor motorTrasEsquerdo(3);
+AF_DCMotor motorFrenteEsquerdo(4);
 AF_DCMotor motorTrasDireito(2);
+AF_DCMotor motorFrenteDireito(1);
 
 CorSensor corSensores[3];
 Cores bufferCores[MAX_BUFFER_CORES];
@@ -128,6 +135,18 @@ float ultimaMedia = 0.0;
 #define QTR_EEPROM_ADDR 0
 #define QTR_EEPROM_MAGIC 0xA5A5
 #define QTR_EEPROM_SIZE (2 + 2 + 8 * 2 * 2 + 2) // magic + sensorCount + min/max for 8 sensors (on/off) + CRC
+
+// ======= Limiares de Cor =======
+#define LIMIAR_BRANCO_R     9000
+#define LIMIAR_BRANCO_G     9000
+#define LIMIAR_BRANCO_B     9000
+
+#define LIMIAR_PRETO_R      1500
+#define LIMIAR_PRETO_G      1700
+#define LIMIAR_PRETO_B      1500
+
+#define TOLERANCIA_CINZA    400    // Diferença máxima entre canais para ser CINZA
+#define FATOR_PREDOMINANCIA 1.20f  // 20% a mais para evitar falsos positivos+
 
 // CRC-16-CCITT
 uint16_t crc16(const uint8_t *data, size_t len)
@@ -358,6 +377,7 @@ void setup()
   Log.verboseln(F("Inicializando sensores de cor..."));
   corSensores[0].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
   corSensores[1].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
+  corSensores[2].tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_50MS, TCS34725_GAIN_60X);
 
   tcaSelect(0);
   corSensores[0].inicializado = corSensores[0].tcs.begin();
@@ -368,8 +388,8 @@ void setup()
   Log.verboseln("Sensor de cor 1 (direita) - %s", corSensores[1].inicializado ? "OK" : "FALHA");
 
   tcaSelect(2);
-  corSensores[3].inicializado = corSensores[1].tcs.begin();
-  Log.verboseln("Sensor de cor 3 (especial) - %s", corSensores[3].inicializado ? "OK" : "FALHA");
+  corSensores[2].inicializado = corSensores[2].tcs.begin();
+  Log.verboseln("Sensor de cor 3 (especial) - %s", corSensores[2].inicializado ? "OK" : "FALHA");
 
   // Rotina inicial
   estadoAtual = Estado::INICIALIZANDO;
@@ -394,7 +414,7 @@ void loop()
       return;
     }
 
-    Cores corCentral = detectarCor(2);
+    Cores corCentral = quickDetectarCor(2);
 
     if (corCentral == VERMELHO)
     {
@@ -588,7 +608,7 @@ void resolverBifurcacao()
   {
     virar90(ESQUERDA);
   }
-  else if (corB == VERDE && corA != VERDE)
+  else if (corA != VERDE && corB == VERDE)
   {
     virar90(DIREITA);
   }
@@ -645,19 +665,43 @@ void atualizarBufferCor(Cores novaCor)
   indiceBuffer = (indiceBuffer + 1) % MAX_BUFFER_CORES;
 }
 
-Cores detectarCor(uint8_t canal)
-{
-  if (canal > 2 || !corSensores[canal].inicializado)
-  {
-    // Fallback usando QTR caso o sensor de cor não esteja disponível
+// ---- Função genérica de classificação ----
+static inline Cores classificarCor(uint16_t r, uint16_t g, uint16_t b) {
+  // Branco
+  if (r > LIMIAR_BRANCO_R && g > LIMIAR_BRANCO_G && b > LIMIAR_BRANCO_B)
+    return BRANCO;
+
+  // Preto
+  if (r < LIMIAR_PRETO_R && g < LIMIAR_PRETO_G && b < LIMIAR_PRETO_B)
+    return PRETO;
+
+  // Cinza
+  if (abs((int)r - (int)g) < TOLERANCIA_CINZA &&
+      abs((int)r - (int)b) < TOLERANCIA_CINZA &&
+      abs((int)g - (int)b) < TOLERANCIA_CINZA)
+    return CINZA;
+
+  // Predominância
+  if (g > r * FATOR_PREDOMINANCIA && g > b * FATOR_PREDOMINANCIA)
+    return VERDE;
+  if (r > g * FATOR_PREDOMINANCIA && r > b * FATOR_PREDOMINANCIA)
+    return VERMELHO;
+  if (b > r * FATOR_PREDOMINANCIA && b > g * FATOR_PREDOMINANCIA)
+    return AZUL;
+
+  return ERRO;
+}
+
+// ---- Detectar com TCA e fallback ----
+Cores detectarCor(uint8_t canal) {
+  if (canal > 2 || !corSensores[canal].inicializado) {
+    // Fallback usando QTR
     unsigned int sensorValues[8];
     qtr.readCalibrated(sensorValues);
     int soma = 0;
-    for (int i = 0; i < 8; i++)
-      soma += sensorValues[i];
+    for (int i = 0; i < 8; i++) soma += sensorValues[i];
     int media = soma / 8;
-    if (media > 400 && media < 900)
-      return VERDE; // fallback supõe marca verde
+    if (media > 400 && media < 900) return VERDE;
     return PRETO;
   }
 
@@ -667,67 +711,22 @@ Cores detectarCor(uint8_t canal)
 
   Log.verboseln("R:%d G:%d B:%d", r, g, b);
 
+  // IMPORTANTE: deixar no canal 2 no final
   tcaSelect(2);
 
-  // Brancos e pretos
-  if (r > 3000 && g > 3500 && b > 3000)
-    return BRANCO;
-  if (r < 1000 && g < 1000 && b < 1000)
-    return PRETO;
-
-  // Cinza — valores intermediários e parecidos
-  if (abs((int)r - (int)g) < 200 &&
-      abs((int)r - (int)b) < 200 &&
-      abs((int)g - (int)b) < 200)
-  {
-    return CINZA;
-  }
-
-  // Determina cor predominante
-  if (g > r && g > b)
-    return VERDE;
-  if (r > g && r > b)
-    return VERMELHO;
-  if (b > r && b > g)
-    return AZUL;
-
-  // Se empatar ou não for detectável
-  return ERRO;
+  return classificarCor(r, g, b);
 }
 
-Cores quickDetectarCor(uint8_t canal)
-{
+// ---- Detectar rápido sem TCA ----
+Cores quickDetectarCor(uint8_t canal) {
+  // Ignora o parâmetro canal, pois sempre lê do canal 2 já selecionado
   uint16_t r, g, b, c;
-  corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
+  corSensores[2].tcs.getRawData(&r, &g, &b, &c);
 
   Log.verboseln("R:%d G:%d B:%d", r, g, b);
 
-  // Brancos e pretos
-  if (r > 4000 && g > 4000 && b > 4000)
-    return BRANCO;
-  if (r < 1000 && g < 1000 && b < 1000)
-    return PRETO;
-
-  // Cinza — valores intermediários e parecidos
-  if (abs((int)r - (int)g) < 500 &&
-      abs((int)r - (int)b) < 500 &&
-      abs((int)g - (int)b) < 500)
-  {
-    return CINZA;
-  }
-
-  // Determina cor predominante
-  if (g > r && g > b)
-    return VERDE;
-  if (r > g && r > b)
-    return VERMELHO;
-  if (b > r && b > g)
-    return AZUL;
-
-  // Se empatar ou não for detectável
-  return ERRO;
+  return classificarCor(r, g, b);
 }
-
 bool verificarMPU()
 {
   static int tentativasFalhas = 0;
