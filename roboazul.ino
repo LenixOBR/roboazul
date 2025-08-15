@@ -33,7 +33,7 @@ Tabela
 8V - 80 VEL
 */
 
-#define VEL_NORMAL 120
+#define VEL_NORMAL 100
 #define VEL_RESISTENCIA 130
 #define VEL_CURVA 190
 #define VEL_CURVA_EXTREMA 220
@@ -52,6 +52,10 @@ Tabela
 #define KP 90.0f
 #define KI 0.0f
 #define KD 6.0f
+
+#define FILTER_SAMPLES 5
+float pitchSamples[FILTER_SAMPLES];
+int sampleIndex = 0;
 
 // Enumerações com descrições detalhadas
 enum class Estado {
@@ -295,7 +299,7 @@ void setup() {
   mpu.setAccelSensitivity(0);
   mpu.setGyroSensitivity(0);
   mpu.setThrottle(false);
-  mpu.setNormalize(false);  // desativa normalização automática
+  mpu.setNormalize(true);  // desativa normalização automática
 
   if (mpuFuncionando) {
     Log.verboseln(F("Calibrando MPU..."));
@@ -377,18 +381,13 @@ void setup() {
 }
 
 void loop() {
-  Log.verboseln("Estado atual: %d", static_cast<int>(estadoAtual));
+  Log.verboseln("%d", static_cast<int>(estadoAtual));
 
   switch (estadoAtual) {
     case Estado::SEGUINDO_LINHA:
       {
         ledBinOutput(OP_SEGUINDO_LINHA);
 
-        mpu.readGyro();
-        float roll = mpu.getRoll();
-        if (roll > 5) {
-          andarRapido();
-        }
         int distancia = sonar.ping_cm();
         Log.verboseln("%d", distancia);
         if (distancia < DISTANCIA_OBSTACULO && distancia != 0) {
@@ -524,7 +523,7 @@ void lerSensores() {
 float calcularPosicaoLinha() {
   int somaPonderada = 0;
   int total = 0;
-  const int posicoes[8] = { -12000, -6000, -3000, -1000, 1000, 3000, 6000, 12000 };
+  const int posicoes[8] = { -15000, -8000, -4000, -1000, 1000, 4000, 8000, 15000 };
   for (int i = 0; i < 8; i++) {
     if (sensorValues[i] > LIMIAR_LINHA) {
       somaPonderada += posicoes[i];
@@ -553,7 +552,7 @@ void resolverBifurcacao() {
   Log.verboseln("corA: %d | corB: %d", corA, corB);
 
   andarReto();
-  delay(100);
+  delay(300);
 
   // Checa erro antes de seguir
   if (corA == ERRO || corB == ERRO) {
@@ -618,8 +617,6 @@ void atualizarBufferCor(Cores novaCor) {
 
 Cores classificarCor(uint16_t r, uint16_t g, uint16_t b) {
   // ====== Função genérica para classificar uma cor ======
-  Log.verboseln("R:%d G:%d B:%d", r, g, b);
-
   if (r < 2000 && g < 3000 && b < 2000)
     return PRETO;
 
@@ -668,6 +665,7 @@ Cores detectarCor(uint8_t canal) {
   tcaSelect(canal);
   uint16_t r, g, b, c;
   corSensores[canal].tcs.getRawData(&r, &g, &b, &c);
+  Log.verboseln("R:%d G:%d B:%d", r, g, b);
   tcaSelect(2);  // deixa sempre no canal 2
   return classificarCor(r, g, b);
 }
@@ -873,6 +871,18 @@ bool temParedeColada(int dist) {
 
 bool temBuraco(int dist) {
   return dist > LIMIAR_BURACO;
+}
+
+float getFilteredPitch() {
+  mpu.read();
+  pitchSamples[sampleIndex] = mpu.getPitch();
+  sampleIndex = (sampleIndex + 1) % FILTER_SAMPLES;
+  
+  float sum = 0;
+  for(int i = 0; i < FILTER_SAMPLES; i++) {
+    sum += pitchSamples[i];
+  }
+  return sum / FILTER_SAMPLES;
 }
 
 void salaDeResgate() {
