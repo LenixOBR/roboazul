@@ -33,7 +33,7 @@ Tabela
 8V - 80 VEL
 */
 
-#define VEL_NORMAL 100
+#define VEL_NORMAL 98
 #define VEL_RESISTENCIA 130
 #define VEL_CURVA 190
 #define VEL_CURVA_EXTREMA 220
@@ -389,7 +389,6 @@ void loop() {
         ledBinOutput(OP_SEGUINDO_LINHA);
 
         int distancia = sonar.ping_cm();
-        Log.verboseln("%d", distancia);
         if (distancia < DISTANCIA_OBSTACULO && distancia != 0) {
           estadoAtual = Estado::DESVIANDO_OBSTACULO;
           return;
@@ -910,7 +909,7 @@ void salaDeResgate() {
       // 5. Verifica linha
       lerSensores();
       float pos = calcularPosicaoLinha();
-      if (pos != 0 && pos != 69) {
+      if (pos != 0) {
         pararMotores();
         Log.noticeln(F("Linha encontrada! Saindo da sala de resgate."));
         return;
