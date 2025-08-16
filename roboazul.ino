@@ -873,104 +873,50 @@ bool temBuraco(int dist) {
   return dist > LIMIAR_BURACO;
 }
 
-float getFilteredPitch() {
-  mpu.read();
-  pitchSamples[sampleIndex] = mpu.getPitch();
-  sampleIndex = (sampleIndex + 1) % FILTER_SAMPLES;
-  
-  float sum = 0;
-  for(int i = 0; i < FILTER_SAMPLES; i++) {
-    sum += pitchSamples[i];
-  }
-  return sum / FILTER_SAMPLES;
-}
-
 void salaDeResgate() {
-  // Olha para os dois lados antes de entrar
-  int distDir = lerDistancia(ANGULO_DIREITA);
-  int distEsq = lerDistancia(ANGULO_ESQUERDA);
+  Log.noticeln(F("Entrando na sala de resgate..."));
 
-  bool paredeDireita = temParedeColada(distDir);
-  bool paredeEsquerda = temParedeColada(distEsq);
-
-  int ladoParede = -1;  // 0 = direita, 1 = esquerda
-
-  // Decide o lado da parede se houver parede colada
-  if (paredeDireita && !paredeEsquerda) ladoParede = 0;
-  else if (!paredeDireita && paredeEsquerda) ladoParede = 1;
-  else if (paredeDireita && paredeEsquerda) ladoParede = (distDir < distEsq ? 0 : 1);
-
-  // Se não tem parede colada de nenhum lado, entra reto (NÃO vira).
-  andarReto();
-  delay(400);  // tempo para entrar na sala, ajuste se necessário
-  pararMotores();
-
-  // Se não tem parede colada de nenhum lado, segue reto até encontrar uma parede para começar a seguir
-  if (ladoParede == -1) {
-    // Após entrar reto, reanalise até achar parede:
-    while (true) {
-      int dd = lerDistancia(ANGULO_DIREITA);
-      int de = lerDistancia(ANGULO_ESQUERDA);
-      if (temParedeColada(dd)) {
-        ladoParede = 0;
-        break;
-      }
-      if (temParedeColada(de)) {
-        ladoParede = 1;
-        break;
-      }
-      andarReto();
-      delay(100);
-    }
-    pararMotores();
-  }
-
-  // Loop principal de navegação na sala
   while (true) {
-    lerSensores();
-    if (calcularPosicaoLinha() != 0) {
-      servoUltrassonico.write(90);
-      pararMotores();
-      return;
-    }
-
-    // Olha para os dois lados SEMPRE, não só para o lado que está seguindo
-    int distDireita = lerDistancia(ANGULO_DIREITA);
-    int distEsquerda = lerDistancia(ANGULO_ESQUERDA);
-
-    int distLado = ladoParede == 0 ? distDireita : distEsquerda;
-    int distFrente = lerDistancia(ANGULO_FRENTE);
-    int dist45 = ladoParede == 0 ? lerDistancia(ANGULO_45_DIREITA) : lerDistancia(ANGULO_45_ESQUERDA);
-
-    bool buracoLado = temBuraco(distLado);
-    bool buracoFrente = temBuraco(distFrente) || temBuraco(dist45);
-
-    // Se detectar parede colada do outro lado, permita trocar lado (opcional, se quiser sempre seguir o lado inicial, remova isso!)
-    // if (ladoParede == 0 && temParedeColada(distEsquerda)) ladoParede = 1;
-    // if (ladoParede == 1 && temParedeColada(distDireita)) ladoParede = 0;
-
-    // Entra no buraco lateral se encontrar
-    if (buracoLado) {
-      pararMotores();
-      delay(80);
-      virar90(ladoParede == 0 ? DIREITA : ESQUERDA);
-      andarReto();
-      delay(DELAY_ANDAR);
-      continue;
-    }
-    // Se tem passagem à frente, entra
-    if (buracoFrente) {
-      andarReto();
-      delay(DELAY_ANDAR);
-      continue;
-    }
-    // Se tem parede na frente, contorna triângulo (dois giros de 45° para o mesmo lado)
-    if (temParedeColada(distFrente)) {
-      contornarTriangulo(ladoParede);
-      continue;
-    }
-    // Se não tem parede, segue reto mantendo paralelismo
+    // 1. Anda reto até chegar perto da parede
     andarReto();
-    delay(DELAY_ANGULO);
+    int distFrente = lerDistancia(ANGULO_FRENTE);
+    if (distFrente < DISTANCIA_PARADA) {
+      pararMotores();
+      delay(200);
+      
+      // 2. Olha para os lados
+      int distDir = lerDistancia(ANGULO_45_DIREITA);
+      int distEsq = lerDistancia(ANGULO_45_ESQUERDA);
+      Log.noticeln("Dist Esq: %d | Dist Dir: %d", distEsq, distDir);
+
+      // 3. Decide para onde ir
+      int direcaoEscolhida;
+      if (distEsq > 100 && distEsq > distDir) {
+        direcaoEscolhida = ESQUERDA;
+        Log.noticeln(F("Ambiente aberto à esquerda. Indo para lá."));
+      } else if (distDir > 100 && distDir > distEsq) {
+        direcaoEscolhida = DIREITA;
+        Log.noticeln(F("Ambiente aberto à direita. Indo para lá."));
+      } else {
+        direcaoEscolhida = (distEsq < distDir) ? ESQUERDA : DIREITA;
+        Log.noticeln("Seguindo lado mais próximo: %s", direcaoEscolhida == ESQUERDA ? "Esquerda" : "Direita");
+      }
+
+      // 4. Virar e seguir
+      virar90(direcaoEscolhida);
+      andarReto();
+      delay(500);
+
+      // 5. Verifica linha
+      lerSensores();
+      float pos = calcularPosicaoLinha();
+      if (pos != 0 && pos != 69) {
+        pararMotores();
+        Log.noticeln(F("Linha encontrada! Saindo da sala de resgate."));
+        return;
+      }
+    }
+
+    delay(50); // Evita leitura excessiva
   }
 }
